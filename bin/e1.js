@@ -83,6 +83,11 @@ async function cmdPush(file, opts) {
   const bank = opts.bank != null ? parseInt(opts.bank, 10) : undefined;
   const slot = opts.slot != null ? parseInt(opts.slot, 10) : undefined;
 
+  // Detect file type by extension
+  if (file.endsWith('.lua')) {
+    return cmdPushLua(file, opts);
+  }
+
   const where = bank != null ? `bank ${bank}, slot ${slot}` : 'active slot';
   process.stdout.write(`Validating ${file}… `);
 
@@ -91,6 +96,19 @@ async function cmdPush(file, opts) {
   log('ok\n');
   log(`  Pushed : "${preset.name}" → ${where}`);
   log(`  Controls: ${preset.controls?.length ?? '?'}\n`);
+}
+
+async function cmdPushLua(file, opts) {
+  const bank = opts.bank != null ? parseInt(opts.bank, 10) : undefined;
+  const slot = opts.slot != null ? parseInt(opts.slot, 10) : undefined;
+
+  const where = bank != null ? `bank ${bank}, slot ${slot}` : 'active slot';
+  process.stdout.write(`Uploading Lua to ${where}… `);
+
+  const lua = await device.pushLuaFromFile(file, { bank, slot });
+  log('ok\n');
+  log(`  Pushed : ${require('path').basename(file)} → ${where}`);
+  log(`  Lines  : ${lua.split('\n').length}\n`);
 }
 
 async function cmdPullLua(opts) {
@@ -174,10 +192,17 @@ program
 
 program
   .command('push <file>')
-  .description('Upload a preset JSON file to the device')
+  .description('Upload a preset (.json) or Lua script (.lua) to the device')
   .option('-b, --bank <n>', 'Target bank (use with --slot; default: active slot)')
   .option('-s, --slot <n>', 'Target slot (use with --bank)')
   .action(run(cmdPush));
+
+program
+  .command('push-lua <file>')
+  .description('Upload a Lua script to a preset slot on the device')
+  .option('-b, --bank <n>', 'Target bank (use with --slot; default: active slot)')
+  .option('-s, --slot <n>', 'Target slot (use with --bank)')
+  .action(run(cmdPushLua));
 
 program
   .command('pull-lua')
