@@ -1,0 +1,12 @@
+{
+  "name": "e1cli",
+  "version": "0.1.0",
+  "description": "CLI for the Electra One MIDI controller",
+  "bin": { "e1": "./bin/e1.js" },
+  "type": "commonjs",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "midi": "^2.0.0"
+  }
+}
