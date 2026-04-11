@@ -1,28 +1,54 @@
 #!/usr/bin/env node
 'use strict';
 
-const { program }  = require('commander');
-const { writeFileSync } = require('fs');
-const { resolve }  = require('path');
-const transport    = require('../lib/transport');
-const device       = require('../lib/device');
-const { version }  = require('../package.json');
+/**
+ * bin/e1.js
+ *
+ * CLI entry point. Commander wiring only — no business logic here.
+ * All real work lives in lib/device.js.
+ */
+
+const { program } = require('commander');
+const transport   = require('../lib/transport');
+const device      = require('../lib/device');
+const { version } = require('../package.json');
+
+// ── Output helpers ────────────────────────────────────────────────────────────
 
 const log  = (...a) => console.log(...a);
 const err  = (...a) => console.error(...a);
-const line = (n = 44) => '─'.repeat(n);
-const run  = (fn) => (...args) => fn(...args).catch((e) => { err(`\nError: ${e.message}\n`); process.exit(1); });
+const line = (n = 42) => '─'.repeat(n);
+
+/** Wrap an async command handler so errors print cleanly and exit non-zero. */
+const run = (fn) => (...args) =>
+  fn(...args).catch((e) => {
+    err(`\nError: ${e.message}\n`);
+    process.exit(1);
+  });
+
+// ── Command implementations ───────────────────────────────────────────────────
 
 async function cmdPorts() {
   const { inputs, outputs } = transport.listAllPorts();
   const { inputPort, outputPort, inputName, outputName } = transport.findE1Ports();
+
   log('\nMIDI Input Ports:');
-  inputs.forEach((n, i) => log(`  [${i}] ${n}${i === inputPort ? ' ◀ Electra One' : ''}`));
+  inputs.forEach((name, i) => {
+    const marker = i === inputPort ? ' ◀ Electra One' : '';
+    log(`  [${i}] ${name}${marker}`);
+  });
+
   log('\nMIDI Output Ports:');
-  outputs.forEach((n, i) => log(`  [${i}] ${n}${i === outputPort ? ' ◀ Electra One' : ''}`));
-  log(inputPort >= 0
-    ? `\n✓ Device found → IN: ${inputName} | OUT: ${outputName}\n`
-    : '\n✗ No Electra One detected. Check USB connection.\n');
+  outputs.forEach((name, i) => {
+    const marker = i === outputPort ? ' ◀ Electra One' : '';
+    log(`  [${i}] ${name}${marker}`);
+  });
+
+  if (inputPort >= 0) {
+    log(`\n✓ Device found → IN: ${inputName} | OUT: ${outputName}\n`);
+  } else {
+    log('\n✗ No Electra One detected. Check USB connection and try again.\n');
+  }
 }
 
 async function cmdInfo() {
@@ -39,71 +65,181 @@ async function cmdInfo() {
 async function cmdPull(opts) {
   const bank = opts.bank != null ? parseInt(opts.bank, 10) : undefined;
   const slot = opts.slot != null ? parseInt(opts.slot, 10) : undefined;
-  process.stdout.write(`Pulling ${bank != null ? `bank ${bank}, slot ${slot}` : 'active preset'}… `);
-  const { preset, outFile } = await device.pullPresetToFile({ bank, slot, outFile: opts.out });
+
+  const where = bank != null ? `bank ${bank}, slot ${slot}` : 'active preset';
+  process.stdout.write(`Pulling ${where}… `);
+
+  const { preset, outFile } = await device.pullPresetToFile({
+    bank, slot, outFile: opts.out,
+  });
+
   log('ok\n');
-  log(`  Name    : ${preset.name}`);
-  log(`  Pages   : ${preset.pages?.length ?? '?'} | Controls: ${preset.controls?.length ?? '?'}`);
-  log(`  Saved   : ${outFile}\n`);
+  log(`  Name : ${preset.name}`);
+  log(`  Pages: ${preset.pages?.length ?? '?'} | Controls: ${preset.controls?.length ?? '?'}`);
+  log(`  Saved: ${outFile}\n`);
 }
 
 async function cmdPush(file, opts) {
   const bank = opts.bank != null ? parseInt(opts.bank, 10) : undefined;
   const slot = opts.slot != null ? parseInt(opts.slot, 10) : undefined;
+
+  const where = bank != null ? `bank ${bank}, slot ${slot}` : 'active slot';
   process.stdout.write(`Validating ${file}… `);
+
+  // pushPresetFromFile validates JSON + structure before sending
   const preset = await device.pushPresetFromFile(file, { bank, slot });
   log('ok\n');
-  log(`  Pushed  : "${preset.name}" → ${bank != null ? `bank ${bank}, slot ${slot}` : 'active slot'}`);
+  log(`  Pushed : "${preset.name}" → ${where}`);
   log(`  Controls: ${preset.controls?.length ?? '?'}\n`);
 }
 
 async function cmdPullLua(opts) {
   const bank = opts.bank != null ? parseInt(opts.bank, 10) : undefined;
   const slot = opts.slot != null ? parseInt(opts.slot, 10) : undefined;
-  process.stdout.write(`Pulling Lua from ${bank != null ? `bank ${bank}, slot ${slot}` : 'active preset'}… `);
-  const lua = await device.getLua({ bank, slot });
+
+  const where = bank != null ? `bank ${bank}, slot ${slot}` : 'active preset';
+  process.stdout.write(`Pulling Lua from ${where}… `);
+
+  const lua     = await device.getLua({ bank, slot });
   const outFile = opts.out || 'main.lua';
+
+  const { writeFileSync } = require('fs');
+  const { resolve } = require('path');
   writeFileSync(outFile, lua, 'utf8');
+
   log('ok\n');
-  log(`  Saved: ${resolve(outFile)} (${lua.split('\n').length} lines)\n`);
+  log(`  Saved: ${resolve(outFile)}`);
+  log(`  Lines: ${lua.split('\n').length}\n`);
 }
 
 async function cmdScan(opts) {
-  const bank      = opts.bank    != null ? parseInt(opts.bank, 10)    : 0;
-  const slotCount = opts.slots   != null ? parseInt(opts.slots, 10)   : 12;
-  const timeoutMs = opts.timeout != null ? parseInt(opts.timeout, 10) : 3000;
+  const bank      = opts.bank != null ? parseInt(opts.bank, 10) : 0;
+  const slotCount = opts.slots != null ? parseInt(opts.slots, 10) : 12;
+
   log(`\nScanning bank ${bank} (${slotCount} slots)…\n`);
-  log('  Slot  Status    Name');
-  log('  ────  ────────  ' + '─'.repeat(34));
+  log(`  Slot  Status    Name`);
+  log(`  ────  ────────  ──────────────────────────────────`);
+
   const results = await device.scanSlots({
-    bank, slotCount, timeoutMs,
+    bank,
+    slotCount,
+    timeoutMs: opts.timeout ? parseInt(opts.timeout, 10) : 3000,
     onSlot: (r) => {
-      const status = { ok: 'ok      ', empty: 'empty   ', error: 'error   ' }[r.status];
-      const name   = r.status === 'ok' ? r.name : r.status === 'error' ? `(${r.error})` : '—';
+      const status = r.status === 'ok'    ? 'ok      '
+                   : r.status === 'empty' ? 'empty   '
+                   :                        'error   ';
+      const name   = r.status === 'ok'    ? r.name
+                   : r.status === 'error' ? `(${r.error})`
+                   :                        '—';
       log(`  [${String(r.slot).padStart(2, '0')}]  ${status}  ${name}`);
     },
   });
-  log(`\n  ${results.filter(r => r.status === 'ok').length} of ${slotCount} slots occupied in bank ${bank}.\n`);
+
+  const found = results.filter(r => r.status === 'ok');
+  log(`\n  ${found.length} of ${slotCount} slots occupied in bank ${bank}.\n`);
 }
 
-program.name('e1').description('Manage your Electra One without the web app').version(version);
-program.command('ports').description('List MIDI ports and identify the Electra One').action(run(cmdPorts));
-program.command('info').description('Show firmware version, model, serial number').action(run(cmdInfo));
-program.command('scan').description('Scan preset slots and list their names')
-  .option('-b, --bank <n>',    'Bank to scan (default: 0)')
-  .option('-n, --slots <n>',   'Number of slots to check (default: 12)')
-  .option('-t, --timeout <ms>','Per-slot timeout in ms (default: 3000)')
+// ── CLI definition ────────────────────────────────────────────────────────────
+
+program
+  .name('e1')
+  .description('Manage your Electra One without the web app')
+  .version(version);
+
+program
+  .command('ports')
+  .description('List all MIDI ports and identify the Electra One')
+  .action(run(cmdPorts));
+
+program
+  .command('info')
+  .description('Show device firmware version, model, and serial number')
+  .action(run(cmdInfo));
+
+program
+  .command('scan')
+  .description('Scan preset slots and show what\'s loaded')
+  .option('-b, --bank <n>', 'Bank to scan (default: 0)')
+  .option('-n, --slots <n>', 'Number of slots to scan (default: 12)')
+  .option('-t, --timeout <ms>', 'Per-slot timeout in ms (default: 3000)')
   .action(run(cmdScan));
-program.command('pull').description('Download a preset to a JSON file')
-  .option('-b, --bank <n>', 'Bank number').option('-s, --slot <n>', 'Slot number')
+
+program
+  .command('pull')
+  .description('Download a preset from the device to a JSON file')
+  .option('-b, --bank <n>', 'Bank number (use with --slot)')
+  .option('-s, --slot <n>', 'Slot number (use with --bank)')
   .option('-o, --out <file>', 'Output filename (default: <preset-name>.json)')
   .action(run(cmdPull));
-program.command('push <file>').description('Upload a preset JSON to the device')
-  .option('-b, --bank <n>', 'Target bank').option('-s, --slot <n>', 'Target slot')
+
+program
+  .command('push <file>')
+  .description('Upload a preset JSON file to the device')
+  .option('-b, --bank <n>', 'Target bank (use with --slot; default: active slot)')
+  .option('-s, --slot <n>', 'Target slot (use with --bank)')
   .action(run(cmdPush));
-program.command('pull-lua').description('Download the Lua script from a preset slot')
-  .option('-b, --bank <n>', 'Bank number').option('-s, --slot <n>', 'Slot number')
+
+program
+  .command('pull-lua')
+  .description('Download the Lua script from the active (or specified) preset slot')
+  .option('-b, --bank <n>', 'Bank number')
+  .option('-s, --slot <n>', 'Slot number')
   .option('-o, --out <file>', 'Output filename (default: main.lua)')
   .action(run(cmdPullLua));
+
+
+// ── backup ────────────────────────────────────────────────────────────────────
+async function cmdBackup(opts) {
+  const bank      = opts.bank   != null ? parseInt(opts.bank, 10)   : 0;
+  const slotCount = opts.slots  != null ? parseInt(opts.slots, 10)  : 12;
+  const outDir    = opts.out    || 'backup';
+
+  log(`\nBacking up bank ${bank} (${slotCount} slots) → ${outDir}/\n`);
+  log('  Slot  Result    Name / File');
+  log('  ────  ────────  ' + '─'.repeat(40));
+
+  const { saved, skipped } = await device.backupBank({
+    bank, slotCount, outDir,
+    onSlot: (s) => {
+      if (s.result === 'saved') {
+        log(`  [${String(s.slot).padStart(2,'0')}]  saved     ${s.name}  →  ${require('path').basename(s.file)}`);
+      } else if (s.result === 'empty') {
+        log(`  [${String(s.slot).padStart(2,'0')}]  empty     —`);
+      } else {
+        log(`  [${String(s.slot).padStart(2,'0')}]  error     (${s.error})`);
+      }
+    },
+  });
+
+  log(`\n  ✓ ${saved} preset(s) saved, ${skipped} slot(s) skipped.\n`);
+}
+
+// ── switch ────────────────────────────────────────────────────────────────────
+async function cmdSwitch(opts) {
+  if (opts.bank == null || opts.slot == null) {
+    err('\nError: --bank and --slot are required for switch\n');
+    process.exit(1);
+  }
+  const bank = parseInt(opts.bank, 10);
+  const slot = parseInt(opts.slot, 10);
+  process.stdout.write(`Switching to bank ${bank}, slot ${slot}… `);
+  await device.switchSlot(bank, slot);
+  log('ok\n');
+}
+
+program
+  .command('backup')
+  .description('Download all occupied preset slots in a bank to a directory')
+  .option('-b, --bank <n>',  'Bank to back up (default: 0)')
+  .option('-n, --slots <n>', 'Number of slots to check (default: 12)')
+  .option('-o, --out <dir>', 'Output directory (default: ./backup)')
+  .action(run(cmdBackup));
+
+program
+  .command('switch')
+  .description('Switch the active preset slot on the device')
+  .requiredOption('-b, --bank <n>', 'Bank number')
+  .requiredOption('-s, --slot <n>', 'Slot number')
+  .action(run(cmdSwitch));
 
 program.parse(process.argv);
