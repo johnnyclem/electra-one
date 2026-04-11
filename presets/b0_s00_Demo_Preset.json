@@ -1,0 +1,978 @@
+{
+  "version": 2,
+  "name": "Demo Preset",
+  "projectId": "vLm21gX6Am29Mxvmf7wn",
+  "pages": [
+    {
+      "id": 1,
+      "name": "Page 1"
+    },
+    {
+      "id": 2,
+      "name": "Page 2"
+    }
+  ],
+  "groups": [
+    {
+      "id": 13,
+      "pageId": 1,
+      "name": "GROUP 1",
+      "color": "ffffff",
+      "bounds": [
+        16,
+        10,
+        379,
+        16
+      ]
+    },
+    {
+      "id": 15,
+      "pageId": 1,
+      "name": "GROUP 2",
+      "color": "ffffff",
+      "bounds": [
+        408,
+        10,
+        379,
+        16
+      ]
+    },
+    {
+      "id": 16,
+      "pageId": 1,
+      "name": "GROUP 3",
+      "color": "ffffff",
+      "bounds": [
+        16,
+        172,
+        379,
+        16
+      ]
+    },
+    {
+      "id": 17,
+      "pageId": 1,
+      "name": "GROUP 4",
+      "color": "ffffff",
+      "bounds": [
+        408,
+        172,
+        379,
+        16
+      ]
+    },
+    {
+      "id": 14,
+      "pageId": 1,
+      "name": "TRANSPORT",
+      "color": "ffffff",
+      "bounds": [
+        277,
+        342,
+        503,
+        16
+      ]
+    },
+    {
+      "id": 26,
+      "pageId": 2,
+      "name": "CHANNEL A",
+      "color": "ffffff",
+      "bounds": [
+        16,
+        10,
+        771,
+        152
+      ],
+      "variant": "highlighted"
+    },
+    {
+      "id": 27,
+      "pageId": 2,
+      "name": "CHANNEL B",
+      "color": "ffffff",
+      "bounds": [
+        16,
+        172,
+        771,
+        152
+      ],
+      "variant": "highlighted"
+    },
+    {
+      "id": 18,
+      "pageId": 2,
+      "name": "TRANSPORT",
+      "color": "ffffff",
+      "bounds": [
+        277,
+        342,
+        503,
+        16
+      ]
+    }
+  ],
+  "devices": [
+    {
+      "id": 1,
+      "name": "MIDI Device 1",
+      "port": 1,
+      "channel": 1
+    }
+  ],
+  "overlays": [
+    {
+      "id": 1,
+      "items": [
+        {
+          "value": 0,
+          "label": "Mode A"
+        },
+        {
+          "value": 1,
+          "label": "Mode B"
+        },
+        {
+          "value": 2,
+          "label": "Mode C"
+        }
+      ]
+    }
+  ],
+  "controls": [
+    {
+      "id": 1,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "CC #1",
+      "color": "F49500",
+      "bounds": [
+        20,
+        36,
+        175,
+        122
+      ],
+      "pageId": 1,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 1,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 1,
+            "deviceId": 1
+          },
+          "defaultValue": 24,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "CC #2",
+      "color": "F49500",
+      "bounds": [
+        216,
+        36,
+        175,
+        122
+      ],
+      "pageId": 1,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 2,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 2,
+            "deviceId": 1
+          },
+          "defaultValue": 80,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "CC #3",
+      "color": "F49500",
+      "bounds": [
+        412,
+        36,
+        175,
+        122
+      ],
+      "pageId": 1,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 3,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 3,
+            "deviceId": 1
+          },
+          "defaultValue": 63,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "CC #4",
+      "color": "F49500",
+      "bounds": [
+        608,
+        36,
+        175,
+        122
+      ],
+      "pageId": 1,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 4,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 4,
+            "deviceId": 1
+          },
+          "defaultValue": 110,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "CC #5",
+      "color": "529DEC",
+      "bounds": [
+        20,
+        198,
+        175,
+        122
+      ],
+      "pageId": 1,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 5,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 5,
+            "deviceId": 1
+          },
+          "defaultValue": 120,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "CC #6",
+      "color": "529DEC",
+      "bounds": [
+        216,
+        198,
+        175,
+        122
+      ],
+      "pageId": 1,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 6,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 6,
+            "deviceId": 1
+          },
+          "defaultValue": 56,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "CC #7",
+      "color": "529DEC",
+      "bounds": [
+        412,
+        198,
+        175,
+        122
+      ],
+      "pageId": 1,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 7,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 7,
+            "deviceId": 1
+          },
+          "defaultValue": 20,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "CC #8",
+      "color": "529DEC",
+      "bounds": [
+        608,
+        198,
+        175,
+        122
+      ],
+      "pageId": 1,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 8,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 8,
+            "deviceId": 1
+          },
+          "defaultValue": 127,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "pad",
+      "mode": "momentary",
+      "visible": true,
+      "name": "START",
+      "color": "ffffff",
+      "bounds": [
+        277,
+        363,
+        117,
+        51
+      ],
+      "pageId": 1,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 9,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "start",
+            "deviceId": 1
+          },
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "pad",
+      "mode": "momentary",
+      "visible": true,
+      "name": "STOP",
+      "color": "ffffff",
+      "bounds": [
+        407,
+        363,
+        117,
+        51
+      ],
+      "pageId": 1,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 10,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "stop",
+            "deviceId": 1
+          },
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "pad",
+      "mode": "momentary",
+      "visible": true,
+      "name": "REWIND",
+      "color": "ffffff",
+      "bounds": [
+        537,
+        363,
+        117,
+        51
+      ],
+      "pageId": 1,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 11,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 11,
+            "onValue": 0
+          },
+          "defaultValue": "off",
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "list",
+      "visible": true,
+      "variant": "valueOnly",
+      "name": "",
+      "color": "ffffff",
+      "bounds": [
+        667,
+        363,
+        117,
+        51
+      ],
+      "pageId": 1,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 12,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "parameterNumber": 12,
+            "deviceId": 1
+          },
+          "overlayId": 1,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "DIAL",
+      "color": "FC0009",
+      "bounds": [
+        20,
+        36,
+        175,
+        122
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 1,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 26,
+            "deviceId": 1
+          },
+          "defaultValue": 64,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "DIAL",
+      "color": "FC0009",
+      "bounds": [
+        216,
+        36,
+        175,
+        122
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 2,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 27,
+            "deviceId": 1
+          },
+          "defaultValue": 32,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "DIAL",
+      "color": "FC0009",
+      "bounds": [
+        412,
+        36,
+        175,
+        122
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 3,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 28,
+            "deviceId": 1
+          },
+          "defaultValue": 96,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "DIAL",
+      "color": "FC0009",
+      "bounds": [
+        608,
+        36,
+        175,
+        122
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 4,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 29,
+            "deviceId": 1
+          },
+          "defaultValue": 127,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "DIAL",
+      "color": "E4660E",
+      "bounds": [
+        20,
+        198,
+        175,
+        122
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 5,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 30,
+            "deviceId": 1
+          },
+          "defaultValue": 56,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "DIAL",
+      "color": "E4660E",
+      "bounds": [
+        216,
+        198,
+        175,
+        122
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 6,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 31,
+            "deviceId": 1
+          },
+          "defaultValue": 80,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "DIAL",
+      "color": "E4660E",
+      "bounds": [
+        412,
+        198,
+        175,
+        122
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 7,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 32,
+            "deviceId": 1
+          },
+          "defaultValue": 110,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "fader",
+      "mode": "",
+      "visible": true,
+      "variant": "dial",
+      "name": "DIAL",
+      "color": "E4660E",
+      "bounds": [
+        608,
+        198,
+        175,
+        122
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 8,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "min": 0,
+            "max": 127,
+            "parameterNumber": 33,
+            "deviceId": 1
+          },
+          "defaultValue": 16,
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "pad",
+      "mode": "momentary",
+      "visible": true,
+      "name": "START",
+      "color": "ffffff",
+      "bounds": [
+        277,
+        363,
+        117,
+        51
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 9,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "start",
+            "deviceId": 1
+          },
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "pad",
+      "mode": "momentary",
+      "visible": true,
+      "name": "STOP",
+      "color": "ffffff",
+      "bounds": [
+        407,
+        363,
+        117,
+        51
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 10,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "stop",
+            "deviceId": 1
+          },
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "pad",
+      "mode": "momentary",
+      "visible": true,
+      "name": "REWIND",
+      "color": "ffffff",
+      "bounds": [
+        537,
+        363,
+        117,
+        51
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 11,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 11,
+            "onValue": 0
+          },
+          "defaultValue": "off",
+          "id": "value"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "list",
+      "visible": true,
+      "variant": "valueOnly",
+      "name": "",
+      "color": "ffffff",
+      "bounds": [
+        667,
+        363,
+        117,
+        51
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "inputs": [
+        {
+          "potId": 12,
+          "valueId": "value"
+        }
+      ],
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "parameterNumber": 12,
+            "deviceId": 1
+          },
+          "overlayId": 1,
+          "id": "value"
+        }
+      ]
+    }
+  ]
+}
