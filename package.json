@@ -1,12 +1,26 @@
 {
   "name": "e1cli",
-  "version": "0.1.0",
-  "description": "CLI for the Electra One MIDI controller",
-  "bin": { "e1": "./bin/e1.js" },
+  "version": "0.2.0",
+  "description": "TUI + CLI for the Electra One — connect over USB MIDI to view, download, edit, and upload presets",
+  "bin": {
+    "e1": "./bin/e1.js"
+  },
+  "scripts": {
+    "start": "node ./bin/e1.js tui",
+    "tui": "node ./bin/e1.js tui"
+  },
   "type": "commonjs",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "commander": "^12.0.0",
-    "midi": "^2.0.0"
+    "htm": "^3.1.1",
+    "ink": "^5.2.1",
+    "midi": "^2.0.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "ink-testing-library": "^4.0.0"
   }
 }
