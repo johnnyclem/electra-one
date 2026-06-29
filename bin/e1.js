@@ -19,12 +19,22 @@ const log  = (...a) => console.log(...a);
 const err  = (...a) => console.error(...a);
 const line = (n = 42) => '─'.repeat(n);
 
-/** Wrap an async command handler so errors print cleanly and exit non-zero. */
+/**
+ * Wrap an async command handler so errors print cleanly and the process
+ * always exits. The persistent MIDI ports keep the event loop alive, so we
+ * disconnect and exit explicitly once the command finishes.
+ */
 const run = (fn) => (...args) =>
-  fn(...args).catch((e) => {
-    err(`\nError: ${e.message}\n`);
-    process.exit(1);
-  });
+  fn(...args)
+    .then(() => {
+      transport.disconnect();
+      process.exit(0);
+    })
+    .catch((e) => {
+      err(`\nError: ${e.message}\n`);
+      transport.disconnect();
+      process.exit(1);
+    });
 
 // ── Command implementations ───────────────────────────────────────────────────
 
@@ -266,5 +276,20 @@ program
   .requiredOption('-b, --bank <n>', 'Bank number')
   .requiredOption('-s, --slot <n>', 'Slot number')
   .action(run(cmdSwitch));
+
+program
+  .command('tui', { isDefault: true })
+  .description('Launch the full-screen interactive app (default)')
+  .action(() => {
+    // The TUI is an ESM module (Ink); load it dynamically from CommonJS.
+    import('../tui/app.mjs')
+      .then((m) => m.start())
+      .then(() => process.exit(0))
+      .catch((e) => {
+        err(`\nError: ${e.message}\n`);
+        transport.disconnect();
+        process.exit(1);
+      });
+  });
 
 program.parse(process.argv);

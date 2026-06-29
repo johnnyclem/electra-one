@@ -1,16 +1,82 @@
-# Electra One Mini Lua Learning Kit
+# e1 — Electra One companion app
 
-A progressive set of 5 Lua scripts to learn the Electra One's capabilities, from basics to advanced SysEx handling.
+A TUI + CLI for managing your **Electra One** (mk2 / mini) over USB MIDI —
+no web app required. Auto-connects to the device's CTRL port and lets you
+browse, download, view, edit, upload, and activate presets.
 
-## Quick Start
+## Requirements
 
-1. Go to [app.electra.one](https://app.electra.one) (the Preset Editor)
-2. Create a new preset or open an existing one
-3. Click the **Lua** tab in the editor
-4. Paste a script and click **Upload**
-5. Open the **Console** panel to see `print()` output
+- Node.js ≥ 18
+- An Electra One connected over USB (shows up as `Electra Controller … CTRL`)
 
-## The Scripts
+## Install
+
+```bash
+npm install
+```
+
+## Launch the app (TUI)
+
+```bash
+npm start          # or: node bin/e1.js   (tui is the default command)
+```
+
+The app auto-connects, shows your device (model / firmware / serial), and
+scans bank 0. Keys:
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` (or `j`/`k`) | Move between slots |
+| `Enter` | View the selected preset (name, pages, controls, devices) |
+| `p` | **Pull** — download the selected preset to `<name>.json` |
+| `e` | **Edit** — pull → open in `$EDITOR` → upload back on save |
+| `u` | **Upload** — push a `.json` file from disk to the selected slot |
+| `s` | **Activate** — make the selected slot active on the device |
+| `[` / `]` | Previous / next bank |
+| `r` | Re-scan the current bank |
+| `q` | Quit |
+
+> Editing uses `$VISUAL`/`$EDITOR` (falls back to `vi`). Save & close the
+> editor to upload; if the JSON is unchanged or invalid, nothing is sent.
+
+## CLI
+
+Every operation is also scriptable:
+
+```bash
+node bin/e1.js ports                 # list MIDI ports, identify the Electra
+node bin/e1.js info                  # model, firmware, serial
+node bin/e1.js scan -b 0 -n 12       # what's loaded in a bank
+node bin/e1.js pull -b 0 -s 1 -o my.json
+node bin/e1.js push my.json -b 0 -s 1
+node bin/e1.js pull-lua -b 0 -s 1 -o main.lua
+node bin/e1.js backup -b 0 -o ./backup
+node bin/e1.js switch -b 0 -s 1
+```
+
+## How it works
+
+- **`lib/transport.js`** — MIDI I/O. Opens the CTRL port **once** and keeps a
+  persistent connection, serializing SysEx exchanges through a queue and
+  reassembling fragmented responses. (Opening/closing per request crashes
+  libuv on macOS.)
+- **`lib/protocol.js`** — Electra One SysEx framing (manufacturer `00 21 45`).
+  Requests use op `0x02`; uploads use op `0x01` and always target the
+  **active** slot, so `putPreset` first arms the slot with the "set preset
+  slot" command (`0x14 0x08 bank slot`). ACK/NACK are decoded from `7E`
+  messages (`01` = ack, `00` = nack; other codes are notifications).
+- **`lib/device.js`** — high-level operations (info, get/put preset, scan,
+  backup, switch) returning clean structured data.
+- **`tui/app.mjs`** — the Ink front-end (rendered via `htm`, no build step).
+
+---
+
+# Appendix: Lua learning kit
+
+The `scripts/` directory also contains a progressive set of 5 Lua scripts for
+learning the Electra One's scripting capabilities. To use them: open a preset
+at [app.electra.one](https://app.electra.one), click the **Lua** tab, paste a
+script, **Upload**, and watch the **Console** for `print()` output.
 
 | # | Script | Concepts | Difficulty |
 |---|--------|----------|------------|
