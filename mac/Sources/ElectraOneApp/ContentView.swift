@@ -42,6 +42,7 @@ struct ContentView: View {
 
     @State private var zoom: Double = 1.0
     @State private var showGrid = true
+    @State private var snapToGrid = false
     @State private var multiSelection: Set<Int> = []
 
     var body: some View {
@@ -57,10 +58,10 @@ struct ContentView: View {
                         Divider()
                         HStack(spacing: 0) {
                             VStack(spacing: 0) {
-                                DeviceCanvas(zoom: $zoom, showGrid: $showGrid, multiSelection: $multiSelection)
+                                DeviceCanvas(zoom: $zoom, showGrid: $showGrid, snapToGrid: $snapToGrid, multiSelection: $multiSelection)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                                     .background(ElectraTheme.background)
-                                BottomBar(zoom: $zoom, showGrid: $showGrid)
+                                BottomBar(zoom: $zoom, showGrid: $showGrid, snapToGrid: $snapToGrid)
                             }
                             Divider()
                             Inspector(multiSelection: $multiSelection).frame(width: 300)
@@ -261,7 +262,15 @@ private struct DeviceCanvas: View {
     @EnvironmentObject var model: AppModel
     @Binding var zoom: Double
     @Binding var showGrid: Bool
+    @Binding var snapToGrid: Bool
     @Binding var multiSelection: Set<Int>
+
+    // Live group-drag (lifted from the controls so the whole selection moves).
+    @State private var dragIDs: Set<Int> = []
+    @State private var dragOffset: CGSize = .zero
+    // Marquee selection.
+    @State private var marqueeStart: CGPoint?
+    @State private var marqueeRect: CGRect?
 
     private let screenW = PresetDocument.screenWidth
     private let screenH = PresetDocument.screenHeight
@@ -274,7 +283,7 @@ private struct DeviceCanvas: View {
 
             ScrollView([.horizontal, .vertical]) {
                 bezel(scale: scale)
-                    .frame(minWidth: geo.size.width, minHeight: geo.size.height) // center when small
+                    .frame(minWidth: geo.size.width, minHeight: geo.size.height)
             }
             .overlay(alignment: .top) {
                 if multiSelection.count > 1 {
@@ -298,7 +307,7 @@ private struct DeviceCanvas: View {
             RoundedRectangle(cornerRadius: ElectraTheme.bezelCornerRadius).fill(ElectraTheme.bezel)
                 .overlay(RoundedRectangle(cornerRadius: ElectraTheme.bezelCornerRadius).stroke(ElectraTheme.bezelHighlight, lineWidth: 1))
         )
-        .frame(maxWidth: .infinity, maxHeight: .infinity) // center inside the scroll content
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(20)
     }
 
@@ -318,7 +327,10 @@ private struct DeviceCanvas: View {
 
     private func screen(scale: Double) -> some View {
         ZStack(alignment: .topLeading) {
-            Color.black.onTapGesture { model.selectedControlId = nil; multiSelection.removeAll() }
+            Color.black
+                .contentShape(Rectangle())
+                .onTapGesture { model.selectedControlId = nil; multiSelection.removeAll() }
+                .gesture(marqueeGesture(scale: scale))
 
             if showGrid { SlotGridOverlay(scale: scale) }
             ControlSetBands(scale: scale)
@@ -328,8 +340,25 @@ private struct DeviceCanvas: View {
                     control: control,
                     scale: scale,
                     selected: multiSelection.contains(control.id),
+                    liveOffset: dragIDs.contains(control.id) ? dragOffset : .zero,
                     onSelect: { select(control.id) },
-                    onMove: { dx, dy in move(control.id, dx, dy) })
+                    onDragChanged: { t in
+                        if dragIDs.isEmpty { dragIDs = group(for: control.id) }
+                        dragOffset = t
+                    },
+                    onDragEnded: { t in
+                        let ids = dragIDs.isEmpty ? [control.id] : Array(dragIDs)
+                        model.moveControls(ids, dx: Double(t.width) / scale, dy: Double(t.height) / scale, snap: snapToGrid)
+                        dragIDs = []; dragOffset = .zero
+                    })
+            }
+
+            if let r = marqueeRect {
+                Rectangle().fill(ElectraTheme.accent.opacity(0.12))
+                    .overlay(Rectangle().stroke(ElectraTheme.accent, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                    .frame(width: r.width, height: r.height)
+                    .position(x: r.midX, y: r.midY)
+                    .allowsHitTesting(false)
             }
 
             if model.currentControls.isEmpty {
@@ -340,6 +369,31 @@ private struct DeviceCanvas: View {
         }
     }
 
+    private func marqueeGesture(scale: Double) -> some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onChanged { v in
+                let start = marqueeStart ?? v.startLocation
+                marqueeStart = start
+                marqueeRect = CGRect(x: min(start.x, v.location.x), y: min(start.y, v.location.y),
+                                     width: abs(v.location.x - start.x), height: abs(v.location.y - start.y))
+            }
+            .onEnded { _ in
+                if let r = marqueeRect {
+                    let model_ = CGRect(x: r.minX / scale, y: r.minY / scale, width: r.width / scale, height: r.height / scale)
+                    let hits = model.currentControls.filter {
+                        model_.intersects(CGRect(x: $0.x, y: $0.y, width: $0.w, height: $0.h))
+                    }.map(\.id)
+                    multiSelection = Set(hits)
+                    model.selectedControlId = hits.count == 1 ? hits.first : nil
+                }
+                marqueeStart = nil; marqueeRect = nil
+            }
+    }
+
+    private func group(for id: Int) -> Set<Int> {
+        (multiSelection.count > 1 && multiSelection.contains(id)) ? multiSelection : [id]
+    }
+
     private func select(_ id: Int) {
         if NSEvent.modifierFlags.contains(.command) {
             if multiSelection.contains(id) { multiSelection.remove(id) } else { multiSelection.insert(id) }
@@ -348,12 +402,6 @@ private struct DeviceCanvas: View {
             multiSelection = [id]
             model.selectedControlId = id
         }
-    }
-
-    private func move(_ draggedID: Int, _ dx: Double, _ dy: Double) {
-        let ids = multiSelection.count > 1 && multiSelection.contains(draggedID)
-            ? Array(multiSelection) : [draggedID]
-        model.moveControls(ids, dx: dx, dy: dy)
     }
 }
 
@@ -398,10 +446,10 @@ private struct RichControl: View {
     let control: PresetDocument.Control
     let scale: Double
     let selected: Bool
+    let liveOffset: CGSize          // applied to the whole selection during a group drag
     let onSelect: () -> Void
-    let onMove: (Double, Double) -> Void
-
-    @State private var drag: CGSize = .zero
+    let onDragChanged: (CGSize) -> Void
+    let onDragEnded: (CGSize) -> Void
 
     private var color: Color { Color(electraHex: control.colorHex) }
     private var w: CGFloat { control.w * scale }
@@ -410,14 +458,15 @@ private struct RichControl: View {
     var body: some View {
         cell
             .frame(width: w, height: h)
-            .position(x: (control.x + control.w / 2) * scale + drag.width,
-                      y: (control.y + control.h / 2) * scale + drag.height)
-            .gesture(
-                DragGesture(minimumDistance: 2)
-                    .onChanged { drag = $0.translation }
-                    .onEnded { v in onMove(Double(v.translation.width) / scale, Double(v.translation.height) / scale); drag = .zero }
+            .position(x: (control.x + control.w / 2) * scale + liveOffset.width,
+                      y: (control.y + control.h / 2) * scale + liveOffset.height)
+            // Tap + drag coexist cleanly via simultaneousGesture.
+            .simultaneousGesture(TapGesture().onEnded { onSelect() })
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged { onDragChanged($0.translation) }
+                    .onEnded { onDragEnded($0.translation) }
             )
-            .onTapGesture { onSelect() }
     }
 
     @ViewBuilder private var cell: some View {
@@ -567,13 +616,19 @@ private struct AlignmentToolbar: View {
             Text("\(selectedIDs.count) selected").font(.caption).foregroundStyle(ElectraTheme.textSecondary).padding(.horizontal, 4)
             Divider().frame(height: 14)
             btn("align.horizontal.left") { align(.left) }
-            btn("align.horizontal.center.fill") { align(.centerH) }
+            btn("align.horizontal.center") { align(.centerH) }
             btn("align.horizontal.right") { align(.right) }
             Divider().frame(height: 14)
             btn("align.vertical.top") { align(.top) }
-            btn("align.vertical.center.fill") { align(.centerV) }
+            btn("align.vertical.center") { align(.centerV) }
             btn("align.vertical.bottom") { align(.bottom) }
             Divider().frame(height: 14)
+            btn("arrow.left.and.right") { model.distributeControls(Array(selectedIDs), axis: .horizontal) }
+                .disabled(selectedIDs.count < 3).help("Distribute horizontally")
+            btn("arrow.up.and.down") { model.distributeControls(Array(selectedIDs), axis: .vertical) }
+                .disabled(selectedIDs.count < 3).help("Distribute vertically")
+            Divider().frame(height: 14)
+            btn("plus.square.on.square") { model.duplicateControls(Array(selectedIDs)) }.help("Duplicate")
             Button(role: .destructive) { model.deleteControls(Array(selectedIDs)); onClear() } label: {
                 Image(systemName: "trash")
             }.buttonStyle(.borderless)
@@ -648,6 +703,7 @@ private struct Inspector: View {
         HStack {
             Text("CONTROL").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
             Spacer()
+            Button { model.duplicateControls([c.id]) } label: { Image(systemName: "plus.square.on.square") }.buttonStyle(.borderless)
             Button(role: .destructive) { model.deleteSelectedControl() } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
         }
         labeled("Name") {
@@ -722,10 +778,12 @@ private struct BottomBar: View {
     @EnvironmentObject var model: AppModel
     @Binding var zoom: Double
     @Binding var showGrid: Bool
+    @Binding var snapToGrid: Bool
 
     var body: some View {
-        HStack {
+        HStack(spacing: 8) {
             Toggle(isOn: $showGrid) { Label("Grid", systemImage: "grid") }.toggleStyle(.button).controlSize(.small)
+            Toggle(isOn: $snapToGrid) { Label("Snap", systemImage: "square.grid.2x2") }.toggleStyle(.button).controlSize(.small)
             Spacer()
             HStack(spacing: 8) {
                 Button { zoom = max(0.5, zoom - 0.1) } label: { Image(systemName: "minus.magnifyingglass") }.buttonStyle(.borderless)

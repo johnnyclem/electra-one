@@ -36,7 +36,7 @@ struct ElectraOneApp: App {
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(model.document == nil)
                 Button("Save to Device…") { model.presentSaveToDevice() }
-                    .keyboardShortcut("d", modifiers: .command)
+                    .keyboardShortcut("u", modifiers: .command)
                     .disabled(model.document == nil || !model.isConnected)
             }
             CommandGroup(replacing: .undoRedo) {
@@ -54,6 +54,11 @@ struct ElectraOneApp: App {
                 Button("Add Control") { model.addControl() }
                     .keyboardShortcut("k", modifiers: .command)
                     .disabled(model.document == nil)
+                Button("Duplicate Control") {
+                    if let id = model.selectedControlId { model.duplicateControls([id]) }
+                }
+                .keyboardShortcut("d", modifiers: .command)
+                .disabled(model.selectedControlId == nil)
             }
         }
     }

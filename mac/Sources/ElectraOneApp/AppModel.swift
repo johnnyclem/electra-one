@@ -347,18 +347,56 @@ final class AppModel: ObservableObject {
     }
 
     /// Move several controls by the same delta in one undo step (used for
-    /// multi-select drag).
-    func moveControls(_ ids: [Int], dx: Double, dy: Double) {
+    /// multi-select drag). Optionally snaps each control's origin to the
+    /// nearest 6×6 slot.
+    func moveControls(_ ids: [Int], dx: Double, dy: Double, snap: Bool = false) {
         guard !ids.isEmpty else { return }
         let maxX = PresetDocument.screenWidth, maxY = PresetDocument.screenHeight
         edit { doc in
             for id in ids {
                 guard let c = doc.control(id: id) else { continue }
-                let nx = max(0, min(maxX - c.w, c.x + dx))
-                let ny = max(0, min(maxY - c.h, c.y + dy))
+                var nx = max(0, min(maxX - c.w, c.x + dx))
+                var ny = max(0, min(maxY - c.h, c.y + dy))
+                if snap {
+                    let b = SlotGeometry.bounds(forSlot: SlotGeometry.slot(forBounds: nx, ny))
+                    nx = b.x
+                    ny = b.y
+                }
                 doc.setControlBounds(id: id, x: nx, y: ny, w: c.w, h: c.h)
             }
         }
+    }
+
+    func duplicateControls(_ ids: [Int]) {
+        guard !ids.isEmpty else { return }
+        var newIds: [Int] = []
+        edit { doc in for id in ids { if let n = doc.duplicateControl(id: id) { newIds.append(n) } } }
+        if let first = newIds.first { selectedControlId = newIds.count == 1 ? first : nil }
+        message = "Duplicated \(ids.count) control(s)."
+    }
+
+    enum DistributeAxis { case horizontal, vertical }
+
+    /// Evenly distribute control centers along an axis (needs 3+).
+    func distributeControls(_ ids: [Int], axis: DistributeAxis) {
+        guard ids.count >= 3 else { return }
+        edit { doc in
+            var cs = ids.compactMap { doc.control(id: $0) }
+            guard cs.count >= 3 else { return }
+            let center: (PresetDocument.Control) -> Double = { axis == .horizontal ? $0.x + $0.w / 2 : $0.y + $0.h / 2 }
+            cs.sort { center($0) < center($1) }
+            let first = center(cs.first!), last = center(cs.last!)
+            let step = (last - first) / Double(cs.count - 1)
+            for (i, c) in cs.enumerated() {
+                let target = first + step * Double(i)
+                if axis == .horizontal {
+                    doc.setControlBounds(id: c.id, x: target - c.w / 2, y: c.y, w: c.w, h: c.h)
+                } else {
+                    doc.setControlBounds(id: c.id, x: c.x, y: target - c.h / 2, w: c.w, h: c.h)
+                }
+            }
+        }
+        message = "Distributed \(ids.count) controls."
     }
 
     /// Align a set of controls to a shared edge in one undo step.

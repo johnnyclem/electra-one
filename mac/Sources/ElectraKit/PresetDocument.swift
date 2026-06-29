@@ -296,6 +296,25 @@ public struct PresetDocument {
         root["controls"] = controls
     }
 
+    /// Duplicate a control (all fields preserved, incl. ADSR values), offset
+    /// slightly so the copy is visible. Returns the new control's id.
+    @discardableResult
+    public mutating func duplicateControl(id: Int) -> Int? {
+        guard var controls = root["controls"] as? [[String: Any]],
+              let src = controls.first(where: { ($0["id"] as? Int) == id }) else { return nil }
+        var copy = src
+        let newId = (controls.compactMap { $0["id"] as? Int }.max() ?? 0) + 1
+        copy["id"] = newId
+        if var b = (copy["bounds"] as? [Int]) ?? (copy["bounds"] as? [Double])?.map({ Int($0) }), b.count == 4 {
+            b[0] = max(0, min(Int(Self.screenWidth) - b[2], b[0] + 24))
+            b[1] = max(0, min(Int(Self.screenHeight) - b[3], b[1] + 24))
+            copy["bounds"] = b
+        }
+        controls.append(copy)
+        root["controls"] = controls
+        return newId
+    }
+
     /// Add a fresh control of the given kind, placed in the next free grid cell.
     @discardableResult
     public mutating func addControl(kind: ControlKind = .fader, pageId: Int, deviceId: Int? = nil) -> Int {
