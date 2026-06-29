@@ -67,6 +67,19 @@ public actor E1Device {
         return String(bytes: payload, encoding: .utf8) ?? ""
     }
 
+    /// Upload a preset and (optionally) its Lua script to a slot. Arms the slot
+    /// first, sends the preset, then the Lua — matching how the web editor
+    /// publishes a project.
+    public func putProject(json: String, lua: String?, bank: Int?, slot: Int?) async throws {
+        if let b = bank, let s = slot {
+            try await transport.command(E1Proto.presetSlotSelect(bank: b, slot: s))
+        }
+        try await transport.command(E1Proto.presetUpload(json: json))
+        if let lua, !lua.isEmpty {
+            try await transport.command(E1Proto.luaUpload(source: lua))
+        }
+    }
+
     public func switchSlot(bank: Int, slot: Int) async throws {
         try await transport.command(E1Proto.presetSlotSelect(bank: bank, slot: slot))
     }

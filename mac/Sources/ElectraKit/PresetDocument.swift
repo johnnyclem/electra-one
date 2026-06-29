@@ -8,6 +8,11 @@ import Foundation
 public struct PresetDocument {
     public private(set) var root: [String: Any]
 
+    /// Optional Lua script associated with the preset. Populated when importing
+    /// an `.eproj` project (which embeds it) or when fetched from the device.
+    /// Not part of `root`, so it never leaks into the preset JSON upload.
+    public var lua: String? = nil
+
     public init?(jsonString: String) {
         guard let data = jsonString.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]

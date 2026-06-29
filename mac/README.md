@@ -18,6 +18,10 @@ CoreMIDI (no Node required).
 - **Offline** — New Preset / Open File… work with no device. Save to a `.json`
   file. Editing preserves every field of the original JSON, so round-tripping
   never corrupts a preset.
+- **Imports `.eproj` projects** — open an Electra web-editor project and it's
+  converted to the editable preset model: `tiles` → controls, `slotId` →
+  pixel bounds + page/control-set/pot, and the embedded Lua script is carried
+  along. Saving to the device uploads the preset **and** the Lua.
 - **With a device** — browse banks/slots, click a slot to open it in the
   editor, and Save to Device (pick bank/slot) to upload.
 

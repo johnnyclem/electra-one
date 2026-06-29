@@ -402,6 +402,10 @@ private struct Inspector: View {
                 TextField("Page name", text: Binding(get: { page.name }, set: { model.renamePage(page.id, $0) }))
             }
         }
+        if let lua = model.luaInfo {
+            Label(lua, systemImage: "curlybraces.square")
+                .font(.caption).foregroundStyle(.purple)
+        }
         Divider()
         Text("\(model.currentControls.count) control(s) on this page")
             .font(.caption).foregroundStyle(.secondary)
