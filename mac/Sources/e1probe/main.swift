@@ -36,8 +36,9 @@ struct Probe {
             print("(demo preset not found at \(path) — testing template instead)")
         }
 
-        // Import the example .eproj project.
-        let eprojPath = "../eventide_h9_max.eproj"
+        // Import the example .eproj project (repo moved it into projects/).
+        let eprojCandidates = ["../projects/eventide_h9_max.eproj", "../eventide_h9_max.eproj"]
+        let eprojPath = eprojCandidates.first { FileManager.default.fileExists(atPath: $0) } ?? eprojCandidates[0]
         if let text = try? String(contentsOfFile: eprojPath, encoding: .utf8) {
             print("isProject(eproj): \(PresetDocument.isProject(text))")
             if let doc = PresetDocument.load(fileText: text) {
