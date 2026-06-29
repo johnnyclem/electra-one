@@ -41,3 +41,8 @@ luac.out
 
 node_modules/
 .DS_Store
+
+# Swift / macOS app
+mac/.build/
+mac/ElectraOne.app/
+*.swiftpm
