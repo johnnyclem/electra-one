@@ -39,6 +39,14 @@ struct ElectraOneApp: App {
                     .keyboardShortcut("d", modifiers: .command)
                     .disabled(model.document == nil || !model.isConnected)
             }
+            CommandGroup(replacing: .undoRedo) {
+                Button("Undo") { model.undo() }
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(!model.canUndo)
+                Button("Redo") { model.redo() }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(!model.canRedo)
+            }
             CommandGroup(after: .toolbar) {
                 Button("Rescan Bank") { model.rescan() }
                     .keyboardShortcut("r", modifiers: .command)

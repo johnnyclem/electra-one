@@ -43,7 +43,16 @@ final class AppModel: ObservableObject {
     @Published var saveBank = 0
     @Published var saveSlot = 0
 
+    // Undo / redo (document snapshots)
+    @Published private(set) var canUndo = false
+    @Published private(set) var canRedo = false
+    private var undoStack: [PresetDocument] = []
+    private var redoStack: [PresetDocument] = []
+    private let undoLimit = 100
+
     private var scanToken = 0
+
+    enum AlignEdge { case left, centerH, right, top, centerV, bottom }
 
     init() {
         slots = (0..<slotsPerBank).map { SlotState(slot: $0, status: .unknown) }
@@ -153,6 +162,9 @@ final class AppModel: ObservableObject {
         currentPageId = doc.pages.first?.id ?? 1
         selectedControlId = nil
         dirty = false
+        undoStack.removeAll()
+        redoStack.removeAll()
+        refreshUndoFlags()
     }
 
     func newDocument() {
@@ -257,11 +269,40 @@ final class AppModel: ObservableObject {
         return document?.control(id: id)
     }
 
+    /// Single mutation funnel. Snapshots the document for undo before applying.
     private func edit(_ body: (inout PresetDocument) -> Void) {
         guard var doc = document else { return }
+        undoStack.append(doc)
+        if undoStack.count > undoLimit { undoStack.removeFirst() }
+        redoStack.removeAll()
         body(&doc)
         document = doc
         dirty = true
+        refreshUndoFlags()
+    }
+
+    private func refreshUndoFlags() {
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
+    }
+
+    func undo() {
+        guard let prev = undoStack.popLast(), let current = document else { return }
+        redoStack.append(current)
+        document = prev
+        dirty = true
+        if let id = selectedControlId, prev.control(id: id) == nil { selectedControlId = nil }
+        refreshUndoFlags()
+        message = "Undo."
+    }
+
+    func redo() {
+        guard let next = redoStack.popLast(), let current = document else { return }
+        undoStack.append(current)
+        document = next
+        dirty = true
+        refreshUndoFlags()
+        message = "Redo."
     }
 
     func setControlName(_ id: Int, _ name: String) { edit { $0.setControlName(id: id, name) } }
@@ -287,9 +328,54 @@ final class AppModel: ObservableObject {
 
     func deleteSelectedControl() {
         guard let id = selectedControlId else { return }
-        edit { $0.removeControl(id: id) }
-        selectedControlId = nil
-        message = "Deleted control."
+        deleteControls([id])
+    }
+
+    func deleteControls(_ ids: [Int]) {
+        guard !ids.isEmpty else { return }
+        edit { doc in for id in ids { doc.removeControl(id: id) } }
+        if let s = selectedControlId, ids.contains(s) { selectedControlId = nil }
+        message = ids.count == 1 ? "Deleted control." : "Deleted \(ids.count) controls."
+    }
+
+    /// Move several controls by the same delta in one undo step (used for
+    /// multi-select drag).
+    func moveControls(_ ids: [Int], dx: Double, dy: Double) {
+        guard !ids.isEmpty else { return }
+        let maxX = PresetDocument.screenWidth, maxY = PresetDocument.screenHeight
+        edit { doc in
+            for id in ids {
+                guard let c = doc.control(id: id) else { continue }
+                let nx = max(0, min(maxX - c.w, c.x + dx))
+                let ny = max(0, min(maxY - c.h, c.y + dy))
+                doc.setControlBounds(id: id, x: nx, y: ny, w: c.w, h: c.h)
+            }
+        }
+    }
+
+    /// Align a set of controls to a shared edge in one undo step.
+    func alignControls(_ ids: [Int], to edge: AlignEdge) {
+        guard ids.count > 1 else { return }
+        edit { doc in
+            let cs = ids.compactMap { doc.control(id: $0) }
+            guard !cs.isEmpty else { return }
+            let minX = cs.map(\.x).min()!, maxX = cs.map { $0.x + $0.w }.max()!
+            let minY = cs.map(\.y).min()!, maxY = cs.map { $0.y + $0.h }.max()!
+            let cX = (minX + maxX) / 2, cY = (minY + maxY) / 2
+            for c in cs {
+                var x = c.x, y = c.y
+                switch edge {
+                case .left:    x = minX
+                case .right:   x = maxX - c.w
+                case .centerH: x = cX - c.w / 2
+                case .top:     y = minY
+                case .bottom:  y = maxY - c.h
+                case .centerV: y = cY - c.h / 2
+                }
+                doc.setControlBounds(id: c.id, x: x, y: y, w: c.w, h: c.h)
+            }
+        }
+        message = "Aligned \(ids.count) controls."
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

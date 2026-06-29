@@ -1,8 +1,27 @@
 import SwiftUI
+import AppKit
 import ElectraKit
 import UniformTypeIdentifiers
 
-// ── Color helpers ──────────────────────────────────────────────────────────────
+// MARK: - Theme (from the UX design, hardware-inspired)
+
+enum ElectraTheme {
+    static let background = Color(red: 0.12, green: 0.12, blue: 0.14)
+    static let surface = Color(red: 0.16, green: 0.16, blue: 0.18)
+    static let surfaceSecondary = Color(red: 0.22, green: 0.22, blue: 0.25)
+    static let accent = Color(red: 0.96, green: 0.58, blue: 0.0) // Electra orange
+    static let textSecondary = Color.white.opacity(0.7)
+    static let textTertiary = Color.white.opacity(0.45)
+    static let bezel = Color(red: 0.15, green: 0.15, blue: 0.17)
+    static let bezelHighlight = Color.white.opacity(0.08)
+
+    static let titleFont = Font.system(size: 20, weight: .semibold)
+    static let headlineFont = Font.system(size: 15, weight: .semibold)
+    static let monoFont = Font.system(size: 11, weight: .regular, design: .monospaced)
+
+    static let controlCornerRadius: CGFloat = 4
+    static let bezelCornerRadius: CGFloat = 14
+}
 
 extension Color {
     init(electraHex hex: String) {
@@ -10,26 +29,61 @@ extension Color {
         if s.count == 3 { s = s.map { "\($0)\($0)" }.joined() }
         var v: UInt64 = 0
         Scanner(string: s).scanHexInt64(&v)
-        self = Color(
-            red: Double((v >> 16) & 0xff) / 255,
-            green: Double((v >> 8) & 0xff) / 255,
-            blue: Double(v & 0xff) / 255)
+        self = Color(red: Double((v >> 16) & 0xff) / 255,
+                     green: Double((v >> 8) & 0xff) / 255,
+                     blue: Double(v & 0xff) / 255)
     }
 }
 
-// ── Root ───────────────────────────────────────────────────────────────────────
+// MARK: - Root
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
+
+    @State private var zoom: Double = 1.0
+    @State private var showGrid = true
+    @State private var multiSelection: Set<Int> = []
 
     var body: some View {
         NavigationSplitView {
             Sidebar().navigationSplitViewColumnWidth(min: 240, ideal: 270)
         } detail: {
-            EditorPane()
+            Group {
+                if model.document == nil {
+                    WelcomeView()
+                } else {
+                    VStack(spacing: 0) {
+                        EditorHeader()
+                        Divider()
+                        HStack(spacing: 0) {
+                            VStack(spacing: 0) {
+                                DeviceCanvas(zoom: $zoom, showGrid: $showGrid, multiSelection: $multiSelection)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .background(ElectraTheme.background)
+                                BottomBar(zoom: $zoom, showGrid: $showGrid)
+                            }
+                            Divider()
+                            Inspector(multiSelection: $multiSelection).frame(width: 300)
+                        }
+                        Divider()
+                        StatusBar()
+                    }
+                }
+            }
+            // Reflect external single-selection changes (e.g. Add Control) into
+            // the canvas selection — without clobbering an active multi-select.
+            .onChange(of: model.selectedControlId) { id in
+                if let id {
+                    let alreadyInMulti = multiSelection.count > 1 && multiSelection.contains(id)
+                    if multiSelection != [id] && !alreadyInMulti { multiSelection = [id] }
+                } else if multiSelection.count <= 1 {
+                    multiSelection.removeAll()
+                }
+            }
         }
         .toolbar { toolbarContent }
         .sheet(isPresented: $model.savePickerPresented) { SaveToDeviceSheet() }
+        .preferredColorScheme(.dark)
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
@@ -38,24 +92,34 @@ struct ContentView: View {
             Button { model.openFile() } label: { Label("Open", systemImage: "folder") }
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            Button { model.addControl() } label: { Label("Add Control", systemImage: "plus.app") }
+            Button { model.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+                .disabled(!model.canUndo)
+            Button { model.redo() } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
+                .disabled(!model.canRedo)
+
+            Divider()
+
+            Button { model.addControl() } label: { Label("Add", systemImage: "plus") }
                 .disabled(model.document == nil)
-            Button { model.saveToFile() } label: { Label("Save File", systemImage: "square.and.arrow.down") }
+            Button { model.saveToFile() } label: { Label("Save", systemImage: "square.and.arrow.down") }
                 .disabled(model.document == nil)
-            Button { model.presentSaveToDevice() } label: { Label("Save to Device", systemImage: "arrow.up.circle") }
-                .disabled(model.document == nil || !model.isConnected)
+            Button { model.presentSaveToDevice() } label: {
+                Label("Push to Device", systemImage: "arrow.up.circle.fill")
+            }
+            .buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
+            .disabled(model.document == nil || !model.isConnected)
         }
     }
 }
 
-// ── Sidebar ──────────────────────────────────────────────────────────────────────
+// MARK: - Sidebar
 
 private struct Sidebar: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            deviceHeader
+            header.padding(12)
             Divider()
             if model.isConnected {
                 bankPicker
@@ -68,46 +132,31 @@ private struct Sidebar: View {
         }
     }
 
-    @ViewBuilder private var deviceHeader: some View {
+    @ViewBuilder private var header: some View {
         VStack(alignment: .leading, spacing: 3) {
             switch model.connection {
             case .connecting:
-                Label("Connecting…", systemImage: "bolt.horizontal.circle").font(.headline)
+                Label("Connecting…", systemImage: "bolt.horizontal.circle").font(ElectraTheme.headlineFont)
             case .offline:
                 HStack {
                     Label("No device", systemImage: "cable.connector.slash")
-                        .font(.headline).foregroundStyle(.secondary)
+                        .font(ElectraTheme.headlineFont).foregroundStyle(ElectraTheme.textSecondary)
                     Spacer()
                     Button("Retry") { model.reconnect() }.controlSize(.small)
                 }
             case .ready:
-                Text("Electra One \(model.info?.modelUpper ?? "")").font(.headline)
+                Text("Electra One \(model.info?.modelUpper ?? "")").font(ElectraTheme.headlineFont)
                 Text("fw \(model.info?.versionText ?? "?")  ·  \(model.info?.serial ?? "")")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(ElectraTheme.monoFont).foregroundStyle(ElectraTheme.textTertiary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-    }
-
-    private var offlineHint: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Editing offline").font(.subheadline.bold())
-            Text("Create or open a preset to build it visually. Connect an Electra One to load and save presets on the device.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button { model.newDocument() } label: { Label("New", systemImage: "doc.badge.plus") }
-                Button { model.openFile() } label: { Label("Open", systemImage: "folder") }
-            }
-            .controlSize(.small)
-        }
-        .padding(12)
     }
 
     private var bankPicker: some View {
         HStack {
-            Text("Bank").font(.subheadline.bold())
-            Picker("Bank", selection: Binding(get: { model.bank }, set: { model.setBank($0) })) {
+            Text("Bank").font(.caption).foregroundStyle(ElectraTheme.textSecondary)
+            Picker("", selection: Binding(get: { model.bank }, set: { model.setBank($0) })) {
                 ForEach(0..<model.bankCount, id: \.self) { Text("\($0)").tag($0) }
             }
             .labelsHidden().pickerStyle(.segmented)
@@ -118,12 +167,24 @@ private struct Sidebar: View {
     private var slotList: some View {
         List(selection: Binding(get: { model.openSlot }, set: { if let s = $0 { model.openFromSlot(s) } })) {
             Section("Presets") {
-                ForEach(model.slots) { slot in
-                    SlotRow(slot: slot).tag(slot.slot)
-                }
+                ForEach(model.slots) { slot in SlotRow(slot: slot).tag(slot.slot) }
             }
         }
         .listStyle(.sidebar)
+    }
+
+    private var offlineHint: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Editing offline").font(.subheadline.bold())
+            Text("Create or open a preset to build it visually. Connect an Electra One to load and push presets.")
+                .font(.caption).foregroundStyle(ElectraTheme.textSecondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button { model.newDocument() } label: { Label("New", systemImage: "doc.badge.plus") }
+                Button { model.openFile() } label: { Label("Open", systemImage: "folder") }
+            }
+            .controlSize(.small)
+        }
+        .padding(12)
     }
 }
 
@@ -131,15 +192,13 @@ private struct SlotRow: View {
     let slot: SlotState
     var body: some View {
         HStack(spacing: 8) {
-            Text(String(format: "%02d", slot.slot))
-                .font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)
+            Text(String(format: "%02d", slot.slot)).font(ElectraTheme.monoFont).foregroundStyle(ElectraTheme.textTertiary)
             switch slot.status {
             case .ok:       Text(slot.name ?? "(unnamed)")
-            case .empty:    Text("—").foregroundStyle(.tertiary)
-            case .scanning: Text("scanning…").italic().foregroundStyle(.secondary)
-            case .error:    Label("corrupt", systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(.orange).labelStyle(.titleAndIcon)
-            case .unknown:  Text("·").foregroundStyle(.tertiary)
+            case .empty:    Text("—").foregroundStyle(ElectraTheme.textTertiary)
+            case .scanning: Text("scanning…").italic().foregroundStyle(ElectraTheme.textSecondary)
+            case .error:    Label("corrupt", systemImage: "exclamationmark.triangle").foregroundStyle(.orange).labelStyle(.titleAndIcon)
+            case .unknown:  Text("·").foregroundStyle(ElectraTheme.textTertiary)
             }
             Spacer()
         }
@@ -147,69 +206,21 @@ private struct SlotRow: View {
     }
 }
 
-// ── Editor pane ───────────────────────────────────────────────────────────────────
-
-private struct EditorPane: View {
-    @EnvironmentObject var model: AppModel
-
-    var body: some View {
-        if model.document == nil {
-            WelcomeView()
-        } else {
-            VStack(spacing: 0) {
-                EditorHeader()
-                Divider()
-                HStack(spacing: 0) {
-                    PresetCanvas()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color(nsColor: .underPageBackgroundColor))
-                    Divider()
-                    Inspector().frame(width: 290)
-                }
-                Divider()
-                StatusBar()
-            }
-        }
-    }
-}
-
-private struct WelcomeView: View {
-    @EnvironmentObject var model: AppModel
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "slider.horizontal.2.square").font(.system(size: 54)).foregroundStyle(.secondary)
-            Text("Electra One Preset Editor").font(.title2.bold())
-            Text(model.isConnected
-                 ? "Pick a preset slot on the left to edit it, or start a new one."
-                 : "Build a preset offline, or connect an Electra One to load one.")
-                .foregroundStyle(.secondary).multilineTextAlignment(.center)
-            HStack {
-                Button { model.newDocument() } label: { Label("New Preset", systemImage: "doc.badge.plus") }
-                    .buttonStyle(.borderedProminent)
-                Button { model.openFile() } label: { Label("Open File…", systemImage: "folder") }
-            }
-        }
-        .padding(50).frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
+// MARK: - Header + page tabs
 
 private struct EditorHeader: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                TextField("Preset name", text: Binding(
-                    get: { model.document?.name ?? "" },
-                    set: { model.setPresetName($0) }))
-                    .textFieldStyle(.plain).font(.title.bold())
-                Spacer()
-            }
+            TextField("Preset name", text: Binding(get: { model.document?.name ?? "" }, set: { model.setPresetName($0) }))
+                .textFieldStyle(.plain).font(ElectraTheme.titleFont)
             if !model.subtitle.isEmpty {
-                Text(model.subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(model.subtitle).font(.caption).foregroundStyle(ElectraTheme.textTertiary)
             }
             PageTabs()
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(ElectraTheme.surface)
     }
 }
 
@@ -227,7 +238,7 @@ private struct PageTabs: View {
                         Text(page.name)
                             .font(.callout.weight(on ? .semibold : .regular))
                             .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(on ? Color.accentColor.opacity(0.18) : Color.clear)
+                            .background(on ? ElectraTheme.accent.opacity(0.22) : Color.clear)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -237,62 +248,146 @@ private struct PageTabs: View {
     }
 }
 
-// ── The Electra "screen" ─────────────────────────────────────────────────────────
+// MARK: - Device canvas (bezel + screen)
 
-private struct PresetCanvas: View {
+private struct DeviceCanvas: View {
     @EnvironmentObject var model: AppModel
+    @Binding var zoom: Double
+    @Binding var showGrid: Bool
+    @Binding var multiSelection: Set<Int>
+
+    private let screenW = PresetDocument.screenWidth
+    private let screenH = PresetDocument.screenHeight
 
     var body: some View {
         GeometryReader { geo in
-            let scale = min(geo.size.width / PresetDocument.screenWidth,
-                            geo.size.height / PresetDocument.screenHeight)
-            let cw = PresetDocument.screenWidth * scale
-            let ch = PresetDocument.screenHeight * scale
-            ZStack {
-                Color.clear
-                ZStack(alignment: .topLeading) {
-                    Rectangle().fill(Color.black)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.08)))
-                        .onTapGesture { model.selectedControlId = nil }
-                    // Control-set band dividers (the device pages through these).
-                    ForEach([2, 4], id: \.self) { row in
-                        let y = (SlotGeometry.originY + Double(row) * SlotGeometry.pitchY) * scale
-                        Path { p in p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: cw, y: y)) }
-                            .stroke(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                        Text("CS \(row / 2 + 1)")
-                            .font(.system(size: max(7, 9 * scale * 1.4)))
-                            .foregroundStyle(.white.opacity(0.25))
-                            .position(x: 16, y: y + 8)
-                    }
-                    ForEach(model.currentControls) { control in
-                        ControlCell(
-                            control: control,
-                            scale: scale,
-                            selected: model.selectedControlId == control.id,
-                            onSelect: { model.selectedControlId = control.id },
-                            onMove: { dx, dy in
-                                let nx = max(0, min(PresetDocument.screenWidth - control.w, control.x + dx))
-                                let ny = max(0, min(PresetDocument.screenHeight - control.h, control.y + dy))
-                                model.setControlBounds(control.id, x: nx, y: ny, w: control.w, h: control.h)
-                            })
-                    }
-                    if model.currentControls.isEmpty {
-                        Text("No controls on this page.\nUse “Add Control” to place one.")
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(.white.opacity(0.4))
-                            .frame(width: cw, height: ch)
-                    }
-                }
-                .frame(width: cw, height: ch)
-                .clipped()
+            let pad: CGFloat = 80
+            let fit = min((geo.size.width - pad) / screenW, (geo.size.height - pad) / screenH)
+            let scale = max(0.05, fit * zoom)
+
+            ScrollView([.horizontal, .vertical]) {
+                bezel(scale: scale)
+                    .frame(minWidth: geo.size.width, minHeight: geo.size.height) // center when small
             }
-            .frame(width: geo.size.width, height: geo.size.height)
+            .overlay(alignment: .top) {
+                if multiSelection.count > 1 {
+                    AlignmentToolbar(selectedIDs: multiSelection) { multiSelection.removeAll() }
+                        .padding(.top, 10)
+                }
+            }
         }
-        .padding(16)
+    }
+
+    private func bezel(scale: Double) -> some View {
+        let sw = screenW * scale, sh = screenH * scale
+        return VStack(spacing: 6) {
+            portLabels
+            screen(scale: scale)
+                .frame(width: sw, height: sh)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: ElectraTheme.bezelCornerRadius).fill(ElectraTheme.bezel)
+                .overlay(RoundedRectangle(cornerRadius: ElectraTheme.bezelCornerRadius).stroke(ElectraTheme.bezelHighlight, lineWidth: 1))
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity) // center inside the scroll content
+        .padding(20)
+    }
+
+    private var portLabels: some View {
+        let isMini = (model.info?.model ?? "").lowercased().contains("mini")
+        let labels = isMini
+            ? ["USB DEVICE", "USB HOST", "MIDI 1 OUT", "MIDI 1 IN"]
+            : ["USB DEVICE", "USB HOST", "MIDI 1 OUT", "MIDI 2 OUT", "MIDI 1 IN", "MIDI 2 IN"]
+        return HStack(spacing: 0) {
+            ForEach(labels, id: \.self) { l in
+                Text(l).font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundStyle(ElectraTheme.textTertiary).frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.horizontal, 8)
+    }
+
+    private func screen(scale: Double) -> some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.onTapGesture { model.selectedControlId = nil; multiSelection.removeAll() }
+
+            if showGrid { SlotGridOverlay(scale: scale) }
+            ControlSetBands(scale: scale)
+
+            ForEach(model.currentControls) { control in
+                RichControl(
+                    control: control,
+                    scale: scale,
+                    selected: multiSelection.contains(control.id),
+                    onSelect: { select(control.id) },
+                    onMove: { dx, dy in move(control.id, dx, dy) })
+            }
+
+            if model.currentControls.isEmpty {
+                Text("No controls on this page.\nUse Add to place one.")
+                    .multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.4))
+                    .frame(width: screenW * scale, height: screenH * scale)
+            }
+        }
+    }
+
+    private func select(_ id: Int) {
+        if NSEvent.modifierFlags.contains(.command) {
+            if multiSelection.contains(id) { multiSelection.remove(id) } else { multiSelection.insert(id) }
+            model.selectedControlId = multiSelection.count == 1 ? multiSelection.first : nil
+        } else {
+            multiSelection = [id]
+            model.selectedControlId = id
+        }
+    }
+
+    private func move(_ draggedID: Int, _ dx: Double, _ dy: Double) {
+        let ids = multiSelection.count > 1 && multiSelection.contains(draggedID)
+            ? Array(multiSelection) : [draggedID]
+        model.moveControls(ids, dx: dx, dy: dy)
     }
 }
 
-private struct ControlCell: View {
+private struct SlotGridOverlay: View {
+    let scale: Double
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(1...SlotGeometry.slotsPerPage, id: \.self) { slot in
+                let b = SlotGeometry.bounds(forSlot: slot)
+                RoundedRectangle(cornerRadius: 2)
+                    .stroke(Color.white.opacity(0.06), lineWidth: 0.5)
+                    .frame(width: b.w * scale, height: b.h * scale)
+                    .position(x: (b.x + b.w / 2) * scale, y: (b.y + b.h / 2) * scale)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+private struct ControlSetBands: View {
+    let scale: Double
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach([2, 4], id: \.self) { row in
+                let y = (SlotGeometry.originY + Double(row) * SlotGeometry.pitchY) * scale
+                Path { p in
+                    p.move(to: CGPoint(x: 0, y: y))
+                    p.addLine(to: CGPoint(x: SlotGeometry.canvasWidth * scale, y: y))
+                }
+                .stroke(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                Text("CS \(row / 2 + 1)").font(.system(size: max(7, 9 * scale * 1.4)))
+                    .foregroundStyle(.white.opacity(0.22)).position(x: 18, y: y + 9)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+// MARK: - Control
+
+private struct RichControl: View {
     let control: PresetDocument.Control
     let scale: Double
     let selected: Bool
@@ -311,7 +406,7 @@ private struct ControlCell: View {
             .position(x: (control.x + control.w / 2) * scale + drag.width,
                       y: (control.y + control.h / 2) * scale + drag.height)
             .gesture(
-                DragGesture(minimumDistance: 3)
+                DragGesture(minimumDistance: 2)
                     .onChanged { drag = $0.translation }
                     .onEnded { v in onMove(Double(v.translation.width) / scale, Double(v.translation.height) / scale); drag = .zero }
             )
@@ -320,39 +415,34 @@ private struct ControlCell: View {
 
     @ViewBuilder private var cell: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(selected ? Color.white : color.opacity(0.5),
-                                lineWidth: selected ? 2 : 1))
+            RoundedRectangle(cornerRadius: ElectraTheme.controlCornerRadius)
+                .fill(color.opacity(0.18))
+                .overlay(RoundedRectangle(cornerRadius: ElectraTheme.controlCornerRadius)
+                    .stroke(color.opacity(0.7), lineWidth: 1))
             VStack(spacing: 2) {
-                Text(control.name.isEmpty ? control.type : control.name)
+                Text(control.name.isEmpty ? control.type.uppercased() : control.name)
                     .font(.system(size: max(7, 11 * scale * 1.6), weight: .semibold))
-                    .foregroundStyle(color)
-                    .lineLimit(1)
-                    .padding(.top, 3)
+                    .foregroundStyle(color).lineLimit(1).padding(.top, 3)
                 graphic
                 Spacer(minLength: 0)
             }
             .padding(3)
         }
+        .overlay(RoundedRectangle(cornerRadius: ElectraTheme.controlCornerRadius)
+            .stroke(selected ? Color.white : .clear, lineWidth: 2))
     }
 
     @ViewBuilder private var graphic: some View {
         switch control.type {
         case "pad":
-            RoundedRectangle(cornerRadius: 3)
-                .fill(color.opacity(0.35))
+            RoundedRectangle(cornerRadius: 3).fill(color.opacity(0.35))
                 .overlay(RoundedRectangle(cornerRadius: 3).stroke(color, lineWidth: 1))
-                .frame(maxWidth: .infinity)
-                .frame(height: max(8, h * 0.4))
+                .frame(maxWidth: .infinity).frame(height: max(8, h * 0.4))
         case "list":
-            RoundedRectangle(cornerRadius: 2)
-                .stroke(color.opacity(0.7))
+            RoundedRectangle(cornerRadius: 2).stroke(color.opacity(0.7))
                 .overlay(Text("▾").font(.system(size: max(7, 9 * scale * 1.4))).foregroundStyle(color))
                 .frame(height: max(8, h * 0.35))
-        case "vfader": // vertical fader (level meter)
+        case "vfader":
             HStack {
                 Spacer()
                 GeometryReader { g in
@@ -364,7 +454,7 @@ private struct ControlCell: View {
                 .frame(width: max(4, 6 * scale * 1.4))
                 Spacer()
             }
-        default: // fader / dial / others
+        default: // fader / dial
             VStack(spacing: 2) {
                 Spacer(minLength: 0)
                 GeometryReader { g in
@@ -374,37 +464,67 @@ private struct ControlCell: View {
                     }
                 }
                 .frame(height: max(4, 6 * scale * 1.4))
-                Text(valueLabel)
-                    .font(.system(size: max(6, 8 * scale * 1.4), design: .monospaced))
+                Text(valueLabel).font(.system(size: max(6, 8 * scale * 1.4), design: .monospaced))
                     .foregroundStyle(.white.opacity(0.6))
             }
         }
     }
 
-    private var fillFraction: CGFloat {
-        let lo = Double(control.minValue ?? 0)
-        let hi = Double(control.maxValue ?? 127)
-        guard hi > lo else { return 0.5 }
-        return 0.6 // representative; we don't track live values offline
-    }
+    private var fillFraction: CGFloat { 0.6 } // representative (no live value offline)
 
     private var valueLabel: String {
-        if let p = control.parameterNumber, let t = control.messageType {
-            return "\(t) \(p)"
-        }
+        if let p = control.parameterNumber, let t = control.messageType { return "\(t) \(p)" }
         return control.messageType ?? ""
     }
 }
 
-// ── Inspector ─────────────────────────────────────────────────────────────────────
+// MARK: - Alignment toolbar (multi-select)
+
+private struct AlignmentToolbar: View {
+    @EnvironmentObject var model: AppModel
+    let selectedIDs: Set<Int>
+    let onClear: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("\(selectedIDs.count) selected").font(.caption).foregroundStyle(ElectraTheme.textSecondary).padding(.horizontal, 4)
+            Divider().frame(height: 14)
+            btn("align.horizontal.left") { align(.left) }
+            btn("align.horizontal.center.fill") { align(.centerH) }
+            btn("align.horizontal.right") { align(.right) }
+            Divider().frame(height: 14)
+            btn("align.vertical.top") { align(.top) }
+            btn("align.vertical.center.fill") { align(.centerV) }
+            btn("align.vertical.bottom") { align(.bottom) }
+            Divider().frame(height: 14)
+            Button(role: .destructive) { model.deleteControls(Array(selectedIDs)); onClear() } label: {
+                Image(systemName: "trash")
+            }.buttonStyle(.borderless)
+            Button("Clear") { onClear() }.buttonStyle(.bordered).controlSize(.small)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(.ultraThinMaterial).clipShape(Capsule()).shadow(radius: 6)
+    }
+
+    private func btn(_ icon: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: icon) }.buttonStyle(.borderless)
+    }
+
+    private func align(_ edge: AppModel.AlignEdge) { model.alignControls(Array(selectedIDs), to: edge) }
+}
+
+// MARK: - Inspector (full)
 
 private struct Inspector: View {
     @EnvironmentObject var model: AppModel
+    @Binding var multiSelection: Set<Int>
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if let c = model.selectedControl {
+                if multiSelection.count > 1 {
+                    multiInspector
+                } else if let c = model.selectedControl {
                     controlInspector(c)
                 } else {
                     presetInspector
@@ -412,50 +532,59 @@ private struct Inspector: View {
             }
             .padding(14)
         }
+        .background(ElectraTheme.surface)
+    }
+
+    private var multiInspector: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("\(multiSelection.count) CONTROLS").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
+            Text("Use the alignment bar above the canvas, drag to move them together, or delete.")
+                .font(.caption).foregroundStyle(ElectraTheme.textSecondary).fixedSize(horizontal: false, vertical: true)
+            Button(role: .destructive) { model.deleteControls(Array(multiSelection)); multiSelection.removeAll() } label: {
+                Label("Delete \(multiSelection.count)", systemImage: "trash")
+            }
+        }
     }
 
     @ViewBuilder private var presetInspector: some View {
-        Text("Preset").font(.headline)
+        Text("PRESET").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
         labeled("Name") {
             TextField("Name", text: Binding(get: { model.document?.name ?? "" }, set: { model.setPresetName($0) }))
+                .textFieldStyle(.roundedBorder)
         }
         if let page = (model.document?.pages.first { $0.id == model.currentPageId }) {
             labeled("Current page") {
                 TextField("Page name", text: Binding(get: { page.name }, set: { model.renamePage(page.id, $0) }))
+                    .textFieldStyle(.roundedBorder)
             }
         }
         if let lua = model.luaInfo {
-            Label(lua, systemImage: "curlybraces.square")
-                .font(.caption).foregroundStyle(.purple)
+            Label(lua, systemImage: "curlybraces.square").font(.caption).foregroundStyle(.purple)
         }
         Divider()
-        Text("\(model.currentControls.count) control(s) on this page")
-            .font(.caption).foregroundStyle(.secondary)
-        Text("Select a control to edit it, or “Add Control” to place a new one. Drag controls to reposition.")
-            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        Text("\(model.currentControls.count) control(s) on this page").font(.caption).foregroundStyle(ElectraTheme.textSecondary)
+        Text("Select a control to edit it, ⌘-click to multi-select, drag to move. Add places a new one.")
+            .font(.caption).foregroundStyle(ElectraTheme.textTertiary).fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder private func controlInspector(_ c: PresetDocument.Control) -> some View {
         HStack {
-            Text("Control").font(.headline)
+            Text("CONTROL").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
             Spacer()
-            Button(role: .destructive) { model.deleteSelectedControl() } label: {
-                Image(systemName: "trash")
-            }.buttonStyle(.borderless)
+            Button(role: .destructive) { model.deleteSelectedControl() } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
         }
         labeled("Name") {
-            TextField("Name", text: Binding(get: { c.name }, set: { model.setControlName(c.id, $0) }))
+            TextField("Name", text: Binding(get: { c.name }, set: { model.setControlName(c.id, $0) })).textFieldStyle(.roundedBorder)
         }
         labeled("Type") {
             Picker("", selection: Binding(get: { c.type }, set: { model.setControlType(c.id, $0) })) {
-                ForEach(["fader", "pad", "list"], id: \.self) { Text($0.capitalized).tag($0) }
-            }.labelsHidden()
+                ForEach(["fader", "vfader", "pad", "list"], id: \.self) { Text($0.capitalized).tag($0) }
+            }.labelsHidden().pickerStyle(.segmented)
         }
         labeled("Color") {
             HStack(spacing: 6) {
                 ForEach(PresetDocument.palette, id: \.self) { hex in
-                    Circle().fill(Color(electraHex: hex))
-                        .frame(width: 20, height: 20)
+                    Circle().fill(Color(electraHex: hex)).frame(width: 20, height: 20)
                         .overlay(Circle().stroke(Color.primary.opacity(c.colorHex.caseInsensitiveCompare(hex) == .orderedSame ? 0.9 : 0.15), lineWidth: 2))
                         .onTapGesture { model.setControlColor(c.id, hex: hex) }
                 }
@@ -469,12 +598,11 @@ private struct Inspector: View {
             }.labelsHidden()
         }
         labeled("Parameter #") {
-            TextField("", value: Binding(
-                get: { c.parameterNumber ?? 0 },
-                set: { model.setControlParameterNumber(c.id, $0) }), format: .number)
+            TextField("", value: Binding(get: { c.parameterNumber ?? 0 }, set: { model.setControlParameterNumber(c.id, $0) }), format: .number)
+                .textFieldStyle(.roundedBorder)
         }
         Divider()
-        Text("Position").font(.subheadline.bold())
+        Text("POSITION").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
         HStack {
             numField("X", c.x) { model.setControlBounds(c.id, x: $0, y: c.y, w: c.w, h: c.h) }
             numField("Y", c.y) { model.setControlBounds(c.id, x: c.x, y: $0, w: c.w, h: c.h) }
@@ -487,20 +615,44 @@ private struct Inspector: View {
 
     private func labeled<V: View>(_ title: String, @ViewBuilder _ content: () -> V) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(title).font(.caption).foregroundStyle(ElectraTheme.textSecondary)
             content()
         }
     }
 
     private func numField(_ label: String, _ value: Double, _ set: @escaping (Double) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            TextField("", value: Binding(get: { Int(value) }, set: { set(Double($0)) }), format: .number)
+            Text(label).font(.caption).foregroundStyle(ElectraTheme.textTertiary)
+            TextField("", value: Binding(get: { Int(value) }, set: { set(Double($0)) }), format: .number).textFieldStyle(.roundedBorder)
         }
     }
 }
 
-// ── Status bar + sheets ────────────────────────────────────────────────────────────
+// MARK: - Bottom bar (grid + zoom)
+
+private struct BottomBar: View {
+    @EnvironmentObject var model: AppModel
+    @Binding var zoom: Double
+    @Binding var showGrid: Bool
+
+    var body: some View {
+        HStack {
+            Toggle(isOn: $showGrid) { Label("Grid", systemImage: "grid") }.toggleStyle(.button).controlSize(.small)
+            Spacer()
+            HStack(spacing: 8) {
+                Button { zoom = max(0.5, zoom - 0.1) } label: { Image(systemName: "minus.magnifyingglass") }.buttonStyle(.borderless)
+                Slider(value: $zoom, in: 0.5...2.0).frame(width: 120)
+                Button { zoom = min(2.0, zoom + 0.1) } label: { Image(systemName: "plus.magnifyingglass") }.buttonStyle(.borderless)
+                Text("\(Int(zoom * 100))%").font(ElectraTheme.monoFont).frame(width: 40, alignment: .trailing)
+                Button("Fit") { zoom = 1.0 }.controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(ElectraTheme.surface)
+    }
+}
+
+// MARK: - Status bar
 
 private struct StatusBar: View {
     @EnvironmentObject var model: AppModel
@@ -509,10 +661,33 @@ private struct StatusBar: View {
             if model.busy { ProgressView().controlSize(.small) }
             Text(model.message.isEmpty ? " " : model.message)
                 .font(.callout).lineLimit(1)
-                .foregroundStyle(model.message.hasPrefix("Error") ? .red : .secondary)
+                .foregroundStyle(model.message.hasPrefix("Error") ? .red : ElectraTheme.textSecondary)
             Spacer()
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(ElectraTheme.surface)
+    }
+}
+
+// MARK: - Welcome + Save sheet
+
+private struct WelcomeView: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "slider.horizontal.2.square").font(.system(size: 54)).foregroundStyle(ElectraTheme.textTertiary)
+            Text("Electra One Preset Editor").font(.title2.bold())
+            Text(model.isConnected
+                 ? "Pick a preset slot on the left to edit it, or start a new one."
+                 : "Build a preset offline, or connect an Electra One to load one.")
+                .foregroundStyle(ElectraTheme.textSecondary).multilineTextAlignment(.center)
+            HStack {
+                Button { model.newDocument() } label: { Label("New Preset", systemImage: "doc.badge.plus") }
+                    .buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
+                Button { model.openFile() } label: { Label("Open File…", systemImage: "folder") }
+            }
+        }
+        .padding(50).frame(maxWidth: .infinity, maxHeight: .infinity).background(ElectraTheme.background)
     }
 }
 
@@ -520,9 +695,9 @@ private struct SaveToDeviceSheet: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Save to Device").font(.headline)
+            Text("Push to Device").font(.headline)
             Text("Upload “\(model.documentTitle)” to a slot. This overwrites whatever is there.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(ElectraTheme.textSecondary)
             HStack(spacing: 20) {
                 Stepper("Bank \(model.saveBank)", value: $model.saveBank, in: 0...(model.bankCount - 1))
                 Stepper("Slot \(model.saveSlot)", value: $model.saveSlot, in: 0...(model.slotsPerBank - 1))
@@ -530,7 +705,7 @@ private struct SaveToDeviceSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel") { model.savePickerPresented = false }.keyboardShortcut(.cancelAction)
-                Button("Upload") { model.confirmSaveToDevice() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                Button("Upload") { model.confirmSaveToDevice() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
             }
         }
         .padding(20).frame(width: 380)
