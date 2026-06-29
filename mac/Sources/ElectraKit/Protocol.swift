@@ -63,6 +63,12 @@ public enum E1Proto {
         frame(Op.selectSlot, 0x08, UInt8(bank), UInt8(slot))
     }
 
+    /// Upload a Lua script to the active slot (op `0x01`, resource `0x0C`).
+    public static func luaUpload(source: String) -> [UInt8] {
+        let body = Array(source.utf8)
+        return [sox] + manufacturer + [Op.upload, Res.lua] + body + [eox]
+    }
+
     /// A classified inbound SysEx message.
     public enum Message {
         case data(resource: UInt8, payload: [UInt8])

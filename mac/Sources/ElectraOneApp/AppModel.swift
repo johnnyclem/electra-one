@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 import ElectraKit
 
 /// UI state + orchestration. Published state lives on the main actor; MIDI work
@@ -49,6 +50,12 @@ final class AppModel: ObservableObject {
     }
 
     var isConnected: Bool { if case .ready = connection { return true }; return false }
+
+    var luaInfo: String? {
+        guard let lua = document?.lua, !lua.isEmpty else { return nil }
+        let lines = lua.split(whereSeparator: \.isNewline).count
+        return "Lua script · \(lines) lines"
+    }
 
     var documentTitle: String {
         guard let doc = document else { return "No preset open" }
@@ -119,8 +126,12 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 let raw = try await device.getPresetRaw(bank: targetBank, slot: slot)
-                guard let doc = PresetDocument(jsonString: raw) else {
+                guard var doc = PresetDocument(jsonString: raw) else {
                     throw E1Error.decode("This slot's data isn't valid preset JSON.")
+                }
+                // Preserve any Lua so a later Save to Device doesn't drop it.
+                if let lua = try? await device.getLua(bank: targetBank, slot: slot), !lua.isEmpty {
+                    doc.lua = lua
                 }
                 loadDocument(doc, fileURL: nil, deviceSlot: (targetBank, slot))
                 message = "Opened \"\(doc.name)\"."
@@ -152,18 +163,30 @@ final class AppModel: ObservableObject {
 
     func openFile() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
+        var types: [UTType] = [.json]
+        if let eproj = UTType(filenameExtension: "eproj") { types.append(eproj) }
+        if let epr = UTType(filenameExtension: "epr") { types.append(epr) }
+        panel.allowedContentTypes = types
+        panel.allowsOtherFileTypes = true
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             let text = try String(contentsOf: url, encoding: .utf8)
-            guard let doc = PresetDocument(jsonString: text) else {
-                message = "Error: not a valid preset JSON file."
+            let wasProject = PresetDocument.isProject(text)
+            guard let doc = PresetDocument.load(fileText: text) else {
+                message = "Error: not a valid Electra preset or project file."
                 return
             }
-            loadDocument(doc, fileURL: url, deviceSlot: nil)
+            // A project converts to a new preset; don't tie it to the source file.
+            loadDocument(doc, fileURL: wasProject ? nil : url, deviceSlot: nil)
             openSlot = nil
-            message = "Opened \(url.lastPathComponent)."
+            if wasProject {
+                let n = doc.allControls().count
+                let luaNote = doc.lua != nil ? " (with Lua script)" : ""
+                message = "Imported project “\(doc.name)” — \(n) control(s)\(luaNote)."
+            } else {
+                message = "Opened \(url.lastPathComponent)."
+            }
         } catch {
             message = "Error: \(error.localizedDescription)"
         }
@@ -211,13 +234,15 @@ final class AppModel: ObservableObject {
             return
         }
         let json = doc.jsonString(pretty: false)
+        let lua = doc.lua
         let b = saveBank, s = saveSlot
-        run("Uploading \"\(doc.name)\" → bank \(b), slot \(s)…") {
-            try await self.device.putPreset(json: json, bank: b, slot: s)
+        let luaNote = (lua?.isEmpty == false) ? " + Lua" : ""
+        run("Uploading \"\(doc.name)\"\(luaNote) → bank \(b), slot \(s)…") {
+            try await self.device.putProject(json: json, lua: lua, bank: b, slot: s)
             self.deviceSlot = (bank: b, slot: s)
             self.dirty = false
             if self.bank == b { self.rescan() }
-            return "Saved \"\(doc.name)\" → bank \(b), slot \(s)."
+            return "Saved \"\(doc.name)\"\(luaNote) → bank \(b), slot \(s)."
         }
     }
 

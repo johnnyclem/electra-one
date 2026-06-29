@@ -36,6 +36,27 @@ struct Probe {
             print("(demo preset not found at \(path) — testing template instead)")
         }
 
+        // Import the example .eproj project.
+        let eprojPath = "../eventide_h9_max.eproj"
+        if let text = try? String(contentsOfFile: eprojPath, encoding: .utf8) {
+            print("isProject(eproj): \(PresetDocument.isProject(text))")
+            if let doc = PresetDocument.load(fileText: text) {
+                let controls = doc.allControls()
+                print("Imported \"\(doc.name)\"  controls: \(controls.count)  lua: \(doc.lua != nil ? "\(doc.lua!.count) chars" : "none")")
+                if let c = controls.first {
+                    print("  first control: id=\(c.id) type=\(c.type) name=\"\(c.name)\" bounds=(\(Int(c.x)),\(Int(c.y)),\(Int(c.w)),\(Int(c.h))) set=\(c.controlSetId) pot=\(c.potId ?? -1)")
+                }
+                let types = Set(controls.map { $0.type }).sorted().joined(separator: ",")
+                print("  control types: \(types)")
+                print("  serialized preset re-parses: \(PresetDocument(jsonString: doc.jsonString()) != nil)")
+                print("  no project keys leaked: \(!doc.jsonString().contains("\"tiles\"") && !doc.jsonString().contains("schemaVersion"))")
+            } else {
+                print("✗ failed to import eproj")
+            }
+        } else {
+            print("(eproj example not found at \(eprojPath))")
+        }
+
         // Template + addControl.
         var fresh = PresetDocument.newPreset(name: "Test")
         let id = fresh.addControl(pageId: 1)
