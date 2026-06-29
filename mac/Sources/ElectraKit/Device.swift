@@ -84,6 +84,12 @@ public actor E1Device {
         try await transport.command(E1Proto.presetSlotSelect(bank: bank, slot: slot))
     }
 
+    /// Permanently clear a preset slot on the device (preset + Lua). Frees a
+    /// burned/corrupt slot.
+    public func clearSlot(bank: Int, slot: Int) async throws {
+        try await transport.command(E1Proto.clearSlot(bank: bank, slot: slot))
+    }
+
     // ── Scanning ──────────────────────────────────────────────────────────
 
     /// Scan a single slot. Empty/timeout → `.empty`; malformed → `.error`.

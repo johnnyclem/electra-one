@@ -124,6 +124,7 @@ struct ContentView: View {
 
 private struct Sidebar: View {
     @EnvironmentObject var model: AppModel
+    @State private var slotToClear: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -137,6 +138,17 @@ private struct Sidebar: View {
                 offlineHint
                 Spacer()
             }
+        }
+        .confirmationDialog(
+            slotToClear.map { "Clear bank \(model.bank), slot \($0)?" } ?? "Clear slot?",
+            isPresented: Binding(get: { slotToClear != nil }, set: { if !$0 { slotToClear = nil } }),
+            titleVisibility: .visible,
+            presenting: slotToClear
+        ) { slot in
+            Button("Clear Slot", role: .destructive) { model.clearSlot(slot); slotToClear = nil }
+            Button("Cancel", role: .cancel) { slotToClear = nil }
+        } message: { _ in
+            Text("This permanently removes the preset and any Lua from this slot on the device. It can't be undone.")
         }
     }
 
@@ -175,7 +187,17 @@ private struct Sidebar: View {
     private var slotList: some View {
         List(selection: Binding(get: { model.openSlot }, set: { if let s = $0 { model.openFromSlot(s) } })) {
             Section("Presets") {
-                ForEach(model.slots) { slot in SlotRow(slot: slot).tag(slot.slot) }
+                ForEach(model.slots) { slot in
+                    SlotRow(slot: slot).tag(slot.slot)
+                        .contextMenu {
+                            if slot.status == .ok {
+                                Button("Open") { model.openFromSlot(slot.slot) }
+                            }
+                            if slot.status == .ok || slot.status == .error {
+                                Button("Clear Slot on Device…", role: .destructive) { slotToClear = slot.slot }
+                            }
+                        }
+                }
             }
         }
         .listStyle(.sidebar)

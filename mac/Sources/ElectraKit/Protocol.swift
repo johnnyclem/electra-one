@@ -14,6 +14,7 @@ public enum E1Proto {
         static let upload: UInt8 = 0x01
         static let request: UInt8 = 0x02
         static let response: UInt8 = 0x01
+        static let remove: UInt8 = 0x05
         static let selectSlot: UInt8 = 0x14
         static let ackNack: UInt8 = 0x7E
     }
@@ -67,6 +68,12 @@ public enum E1Proto {
     public static func luaUpload(source: String) -> [UInt8] {
         let body = Array(source.utf8)
         return [sox] + manufacturer + [Op.upload, Res.lua] + body + [eox]
+    }
+
+    /// "Clear preset slot" (op `0x05`, resource `0x08`) — permanently removes
+    /// all files in the slot (preset + Lua), freeing a burned/corrupt slot.
+    public static func clearSlot(bank: Int, slot: Int) -> [UInt8] {
+        frame(Op.remove, 0x08, UInt8(bank), UInt8(slot))
     }
 
     /// A classified inbound SysEx message.

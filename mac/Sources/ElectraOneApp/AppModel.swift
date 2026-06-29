@@ -126,6 +126,24 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Permanently clear a device slot (preset + Lua). For freeing burned or
+    /// corrupt slots. Callers should confirm first — this can't be undone.
+    func clearSlot(_ slot: Int) {
+        guard isConnected else { return }
+        let b = bank
+        run("Clearing bank \(b), slot \(slot)…") {
+            try await self.device.clearSlot(bank: b, slot: slot)
+            if self.openSlot == slot {
+                self.openSlot = nil
+                if self.deviceSlot?.bank == b && self.deviceSlot?.slot == slot {
+                    self.deviceSlot = nil
+                }
+            }
+            self.rescan()
+            return "Cleared bank \(b), slot \(slot)."
+        }
+    }
+
     func openFromSlot(_ slot: Int) {
         guard isConnected else { return }
         openSlot = slot

@@ -270,12 +270,28 @@ program
   .option('-o, --out <dir>', 'Output directory (default: ./backup)')
   .action(run(cmdBackup));
 
+async function cmdClear(opts) {
+  const bank = parseInt(opts.bank, 10);
+  const slot = parseInt(opts.slot, 10);
+  process.stdout.write(`Clearing bank ${bank}, slot ${slot} (preset + Lua)… `);
+  await device.clearSlot(bank, slot);
+  log('ok\n');
+  log('  Slot is now empty.\n');
+}
+
 program
   .command('switch')
   .description('Switch the active preset slot on the device')
   .requiredOption('-b, --bank <n>', 'Bank number')
   .requiredOption('-s, --slot <n>', 'Slot number')
   .action(run(cmdSwitch));
+
+program
+  .command('clear')
+  .description('Permanently clear a preset slot (preset + Lua) — frees a burned/corrupt slot')
+  .requiredOption('-b, --bank <n>', 'Bank number')
+  .requiredOption('-s, --slot <n>', 'Slot number')
+  .action(run(cmdClear));
 
 program
   .command('tui', { isDefault: true })
