@@ -99,8 +99,15 @@ struct ContentView: View {
 
             Divider()
 
-            Button { model.addControl() } label: { Label("Add", systemImage: "plus") }
-                .disabled(model.document == nil)
+            Menu {
+                ForEach(PresetDocument.ControlKind.allCases, id: \.self) { kind in
+                    Button(kind.displayName) { model.addControl(kind: kind) }
+                }
+            } label: {
+                Label("Add", systemImage: "plus")
+            }
+            .menuIndicator(.visible)
+            .disabled(model.document == nil)
             Button { model.saveToFile() } label: { Label("Save", systemImage: "square.and.arrow.down") }
                 .disabled(model.document == nil)
             Button { model.presentSaveToDevice() } label: {
@@ -433,16 +440,16 @@ private struct RichControl: View {
     }
 
     @ViewBuilder private var graphic: some View {
-        switch control.type {
-        case "pad":
+        switch control.kind {
+        case .pad:
             RoundedRectangle(cornerRadius: 3).fill(color.opacity(0.35))
                 .overlay(RoundedRectangle(cornerRadius: 3).stroke(color, lineWidth: 1))
                 .frame(maxWidth: .infinity).frame(height: max(8, h * 0.4))
-        case "list":
+        case .list:
             RoundedRectangle(cornerRadius: 2).stroke(color.opacity(0.7))
                 .overlay(Text("▾").font(.system(size: max(7, 9 * scale * 1.4))).foregroundStyle(color))
                 .frame(height: max(8, h * 0.35))
-        case "vfader":
+        case .vfader:
             HStack {
                 Spacer()
                 GeometryReader { g in
@@ -454,7 +461,12 @@ private struct RichControl: View {
                 .frame(width: max(4, 6 * scale * 1.4))
                 Spacer()
             }
-        default: // fader / dial
+        case .knob:
+            KnobShape(color: color, fraction: fillFraction)
+                .padding(.vertical, 2)
+        case .adsr:
+            ADSRShape(color: color).padding(.horizontal, 2).padding(.bottom, 2)
+        case .fader:
             VStack(spacing: 2) {
                 Spacer(minLength: 0)
                 GeometryReader { g in
@@ -475,6 +487,71 @@ private struct RichControl: View {
     private var valueLabel: String {
         if let p = control.parameterNumber, let t = control.messageType { return "\(t) \(p)" }
         return control.messageType ?? ""
+    }
+}
+
+/// Rotary knob: a track arc, a value arc, and a pointer (270° sweep).
+private struct KnobShape: View {
+    let color: Color
+    let fraction: CGFloat
+    private let start = Angle(degrees: 135)
+    private let sweep = 270.0
+
+    var body: some View {
+        GeometryReader { g in
+            let side = min(g.size.width, g.size.height)
+            let lw = max(1.5, side * 0.12)
+            ZStack {
+                Circle().trim(from: 0, to: 0.75)
+                    .stroke(Color.white.opacity(0.15), style: StrokeStyle(lineWidth: lw, lineCap: .round))
+                    .rotationEffect(.degrees(135))
+                Circle().trim(from: 0, to: 0.75 * fraction)
+                    .stroke(color, style: StrokeStyle(lineWidth: lw, lineCap: .round))
+                    .rotationEffect(.degrees(135))
+                // pointer
+                Path { p in
+                    p.move(to: CGPoint(x: side / 2, y: side / 2))
+                    let a = (start.degrees + sweep * Double(fraction)) * .pi / 180
+                    p.addLine(to: CGPoint(x: side / 2 + cos(a) * side * 0.32,
+                                          y: side / 2 + sin(a) * side * 0.32))
+                }
+                .stroke(color, style: StrokeStyle(lineWidth: max(1, lw * 0.6), lineCap: .round))
+            }
+            .frame(width: side, height: side)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+/// Classic ADSR envelope outline (attack ramp, decay to sustain, hold,
+/// release) drawn across the control's body.
+private struct ADSRShape: View {
+    let color: Color
+    var body: some View {
+        GeometryReader { g in
+            let w = g.size.width, h = g.size.height
+            let attackX = w * 0.18, decayX = w * 0.38, sustainEndX = w * 0.7
+            let sustainY = h * 0.45
+            Path { p in
+                p.move(to: CGPoint(x: 0, y: h))
+                p.addLine(to: CGPoint(x: attackX, y: 0))            // attack
+                p.addLine(to: CGPoint(x: decayX, y: sustainY))       // decay
+                p.addLine(to: CGPoint(x: sustainEndX, y: sustainY))  // sustain
+                p.addLine(to: CGPoint(x: w, y: h))                   // release
+            }
+            .stroke(color, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
+            .overlay(
+                Path { p in
+                    p.move(to: CGPoint(x: 0, y: h))
+                    p.addLine(to: CGPoint(x: attackX, y: 0))
+                    p.addLine(to: CGPoint(x: decayX, y: sustainY))
+                    p.addLine(to: CGPoint(x: sustainEndX, y: sustainY))
+                    p.addLine(to: CGPoint(x: w, y: h))
+                    p.closeSubpath()
+                }
+                .fill(color.opacity(0.15))
+            )
+        }
     }
 }
 
@@ -576,10 +653,10 @@ private struct Inspector: View {
         labeled("Name") {
             TextField("Name", text: Binding(get: { c.name }, set: { model.setControlName(c.id, $0) })).textFieldStyle(.roundedBorder)
         }
-        labeled("Type") {
-            Picker("", selection: Binding(get: { c.type }, set: { model.setControlType(c.id, $0) })) {
-                ForEach(["fader", "vfader", "pad", "list"], id: \.self) { Text($0.capitalized).tag($0) }
-            }.labelsHidden().pickerStyle(.segmented)
+        labeled("Kind") {
+            Picker("", selection: Binding(get: { c.kind }, set: { model.setControlKind(c.id, $0) })) {
+                ForEach(PresetDocument.ControlKind.allCases, id: \.self) { Text($0.displayName).tag($0) }
+            }.labelsHidden()
         }
         labeled("Color") {
             HStack(spacing: 6) {
@@ -592,14 +669,25 @@ private struct Inspector: View {
         }
         Divider()
         Text("MIDI").font(.subheadline.bold())
-        labeled("Message") {
-            Picker("", selection: Binding(get: { c.messageType ?? "cc7" }, set: { model.setControlMessageType(c.id, $0) })) {
-                ForEach(["cc7", "cc14", "nrpn", "rpn", "note", "program", "start", "stop"], id: \.self) { Text($0).tag($0) }
-            }.labelsHidden()
-        }
-        labeled("Parameter #") {
-            TextField("", value: Binding(get: { c.parameterNumber ?? 0 }, set: { model.setControlParameterNumber(c.id, $0) }), format: .number)
-                .textFieldStyle(.roundedBorder)
+        if c.kind == .adsr {
+            ForEach(model.document?.controlValues(id: c.id) ?? [], id: \.valueId) { v in
+                labeled("\(v.valueId.capitalized) CC") {
+                    TextField("", value: Binding(
+                        get: { v.parameterNumber ?? 0 },
+                        set: { model.setValueParameterNumber(c.id, valueId: v.valueId, $0) }), format: .number)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+        } else {
+            labeled("Message") {
+                Picker("", selection: Binding(get: { c.messageType ?? "cc7" }, set: { model.setControlMessageType(c.id, $0) })) {
+                    ForEach(["cc7", "cc14", "nrpn", "rpn", "note", "program", "start", "stop"], id: \.self) { Text($0).tag($0) }
+                }.labelsHidden()
+            }
+            labeled("Parameter #") {
+                TextField("", value: Binding(get: { c.parameterNumber ?? 0 }, set: { model.setControlParameterNumber(c.id, $0) }), format: .number)
+                    .textFieldStyle(.roundedBorder)
+            }
         }
         Divider()
         Text("POSITION").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)

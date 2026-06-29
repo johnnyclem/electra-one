@@ -63,6 +63,57 @@ public struct PresetDocument {
 
     // ── Controls ─────────────────────────────────────────────────────────────
 
+    /// User-facing control kinds. Several map to the same Electra `type` with a
+    /// different `variant` (a Knob is a `fader` with the `dial` variant).
+    public enum ControlKind: String, CaseIterable, Sendable {
+        case fader, knob, vfader, pad, list, adsr
+
+        public var displayName: String {
+            switch self {
+            case .fader:  return "Fader"
+            case .knob:   return "Knob"
+            case .vfader: return "VFader"
+            case .pad:    return "Pad"
+            case .list:   return "List"
+            case .adsr:   return "ADSR"
+            }
+        }
+
+        var rawType: String {
+            switch self {
+            case .fader, .knob: return "fader"
+            case .vfader:       return "vfader"
+            case .pad:          return "pad"
+            case .list:         return "list"
+            case .adsr:         return "adsr"
+            }
+        }
+
+        /// Variant to write: `dial` for a knob, `""` for a plain fader, and
+        /// nil (remove the key) for the rest.
+        var rawVariant: String? {
+            switch self {
+            case .knob:  return "dial"
+            case .fader: return ""
+            default:     return nil
+            }
+        }
+
+        public static func from(type: String, variant: String?) -> ControlKind {
+            switch type {
+            case "fader":  return variant == "dial" ? .knob : .fader
+            case "vfader": return .vfader
+            case "pad":    return .pad
+            case "list":   return .list
+            case "adsr", "adr", "dx7envelope": return .adsr
+            default:       return .fader
+            }
+        }
+    }
+
+    /// The four ADSR value ids, in display order.
+    public static let adsrValueIds = ["attack", "decay", "sustain", "release"]
+
     public struct Control: Identifiable, Hashable {
         public var id: Int
         public var type: String
@@ -78,7 +129,10 @@ public struct PresetDocument {
         public var deviceId: Int?
         public var minValue: Int?
         public var maxValue: Int?
+        public var valueCount: Int
         public var visible: Bool
+
+        public var kind: ControlKind { ControlKind.from(type: type, variant: variant) }
     }
 
     private static func parseControl(_ c: [String: Any]) -> Control? {
@@ -103,6 +157,7 @@ public struct PresetDocument {
             deviceId: firstMsg?["deviceId"] as? Int,
             minValue: firstMsg?["min"] as? Int,
             maxValue: firstMsg?["max"] as? Int,
+            valueCount: values.count,
             visible: c["visible"] as? Bool ?? true
         )
     }
@@ -175,15 +230,75 @@ public struct PresetDocument {
         mutateControl(id: id) { $0["type"] = type }
     }
 
+    /// Read each value's id + parameter number (ADSR has four).
+    public func controlValues(id: Int) -> [(valueId: String, parameterNumber: Int?)] {
+        guard let controls = root["controls"] as? [[String: Any]],
+              let c = controls.first(where: { ($0["id"] as? Int) == id }) else { return [] }
+        let values = c["values"] as? [[String: Any]] ?? []
+        return values.map { v in
+            let m = v["message"] as? [String: Any]
+            return (v["id"] as? String ?? "value", m?["parameterNumber"] as? Int)
+        }
+    }
+
+    /// Set the parameter number of a specific value by id (for multi-value
+    /// controls like ADSR).
+    public mutating func setValueParameterNumber(controlId: Int, valueId: String, _ number: Int) {
+        mutateControl(id: controlId) { c in
+            var values = c["values"] as? [[String: Any]] ?? []
+            for i in values.indices where (values[i]["id"] as? String) == valueId {
+                var v = values[i]
+                var m = v["message"] as? [String: Any] ?? ["type": "cc7", "min": 0, "max": 127]
+                m["parameterNumber"] = number
+                v["message"] = m
+                values[i] = v
+            }
+            c["values"] = values
+        }
+    }
+
+    /// Change a control's kind, updating type/variant and (for ADSR) the value
+    /// structure so the result is a valid control.
+    public mutating func setControlKind(id: Int, _ kind: ControlKind) {
+        let dev = (root["devices"] as? [[String: Any]])?.first?["id"] as? Int ?? 1
+        mutateControl(id: id) { c in
+            c["type"] = kind.rawType
+            if let v = kind.rawVariant { c["variant"] = v } else { c.removeValue(forKey: "variant") }
+
+            let existing = c["values"] as? [[String: Any]] ?? []
+            let isADSR = kind == .adsr
+            let hasADSRShape = existing.count == 4
+
+            if isADSR && !hasADSRShape {
+                let base = (existing.first?["message"] as? [String: Any])?["parameterNumber"] as? Int ?? 1
+                let pot = (c["inputs"] as? [[String: Any]])?.first?["potId"] as? Int ?? 1
+                c["inputs"] = Self.adsrValueIds.enumerated().map { i, vid in
+                    ["potId": min(12, pot + i), "valueId": vid]
+                }
+                c["values"] = Self.adsrValueIds.enumerated().map { i, vid in
+                    ["id": vid, "defaultValue": 0,
+                     "message": ["type": "cc7", "min": 0, "max": 127, "parameterNumber": base + i, "deviceId": dev]]
+                }
+            } else if !isADSR && hasADSRShape {
+                // Collapse the 4 ADSR values back to a single value.
+                let first = existing.first ?? [:]
+                let msg = first["message"] as? [String: Any] ?? ["type": "cc7", "min": 0, "max": 127, "deviceId": dev]
+                let pot = (c["inputs"] as? [[String: Any]])?.first?["potId"] as? Int ?? 1
+                c["inputs"] = [["potId": pot, "valueId": "value"]]
+                c["values"] = [["id": "value", "defaultValue": 0, "message": msg]]
+            }
+        }
+    }
+
     public mutating func removeControl(id: Int) {
         guard var controls = root["controls"] as? [[String: Any]] else { return }
         controls.removeAll { ($0["id"] as? Int) == id }
         root["controls"] = controls
     }
 
-    /// Add a fresh fader control on a page, placed in the next free grid cell.
+    /// Add a fresh control of the given kind, placed in the next free grid cell.
     @discardableResult
-    public mutating func addControl(pageId: Int, deviceId: Int? = nil) -> Int {
+    public mutating func addControl(kind: ControlKind = .fader, pageId: Int, deviceId: Int? = nil) -> Int {
         var controls = root["controls"] as? [[String: Any]] ?? []
         let newId = (controls.compactMap { $0["id"] as? Int }.max() ?? 0) + 1
         let dev = deviceId ?? (root["devices"] as? [[String: Any]])?.first?["id"] as? Int ?? 1
@@ -193,24 +308,38 @@ public struct PresetDocument {
         let slot = (used % SlotGeometry.slotsPerPage) + 1
         let (col, row) = SlotGeometry.cell(forSlot: slot)
         let b = SlotGeometry.bounds(forSlot: slot)
+        let pot = SlotGeometry.pot(col: col, row: row)
 
-        let control: [String: Any] = [
+        var control: [String: Any] = [
             "id": newId,
-            "type": "fader",
-            "variant": "dial",
+            "type": kind.rawType,
             "visible": true,
-            "name": "CC #\(newId)",
+            "name": kind == .adsr ? "ADSR" : "CC #\(newId)",
             "color": Self.palette[1 + (newId % (Self.palette.count - 1))],
-            "bounds": b.array,
             "pageId": pageId,
             "controlSetId": SlotGeometry.controlSet(forRow: row),
-            "inputs": [["potId": SlotGeometry.pot(col: col, row: row), "valueId": "value"]],
-            "values": [[
-                "message": ["type": "cc7", "min": 0, "max": 127, "parameterNumber": newId, "deviceId": dev],
-                "defaultValue": 0,
-                "id": "value",
-            ]],
         ]
+        if let v = kind.rawVariant { control["variant"] = v }
+
+        if kind == .adsr {
+            // ADSR spans two columns and carries four CC values.
+            control["bounds"] = [b.x, b.y, b.w + SlotGeometry.pitchX, b.h].map { Int($0.rounded()) }
+            control["inputs"] = Self.adsrValueIds.enumerated().map { i, vid in
+                ["potId": min(12, pot + i), "valueId": vid]
+            }
+            control["values"] = Self.adsrValueIds.enumerated().map { i, vid in
+                ["id": vid, "defaultValue": 0,
+                 "message": ["type": "cc7", "min": 0, "max": 127, "parameterNumber": newId + i, "deviceId": dev]]
+            }
+        } else {
+            control["bounds"] = b.array
+            control["inputs"] = [["potId": pot, "valueId": "value"]]
+            control["values"] = [[
+                "id": "value", "defaultValue": 0,
+                "message": ["type": "cc7", "min": 0, "max": 127, "parameterNumber": newId, "deviceId": dev],
+            ]]
+        }
+
         controls.append(control)
         root["controls"] = controls
         return newId

@@ -318,12 +318,20 @@ final class AppModel: ObservableObject {
     func setPresetName(_ name: String) { edit { $0.name = name } }
     func renamePage(_ id: Int, _ name: String) { edit { $0.renamePage(id: id, to: name) } }
 
-    func addControl() {
+    func addControl(kind: PresetDocument.ControlKind = .fader) {
         edit { doc in
-            let newId = doc.addControl(pageId: currentPageId)
+            let newId = doc.addControl(kind: kind, pageId: currentPageId)
             DispatchQueue.main.async { self.selectedControlId = newId }
         }
-        message = "Added control."
+        message = "Added \(kind.displayName)."
+    }
+
+    func setControlKind(_ id: Int, _ kind: PresetDocument.ControlKind) {
+        edit { $0.setControlKind(id: id, kind) }
+    }
+
+    func setValueParameterNumber(_ controlId: Int, valueId: String, _ n: Int) {
+        edit { $0.setValueParameterNumber(controlId: controlId, valueId: valueId, n) }
     }
 
     func deleteSelectedControl() {

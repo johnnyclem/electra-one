@@ -64,6 +64,22 @@ struct Probe {
         let c = fresh.control(id: id)
         print("New preset: control added id=\(id) type=\(c?.type ?? "?") bounds=(\(Int(c?.x ?? 0)),\(Int(c?.y ?? 0)),\(Int(c?.w ?? 0)),\(Int(c?.h ?? 0)))")
         print("Re-parse of serialized template valid: \(PresetDocument(jsonString: fresh.jsonString()) != nil)")
+
+        // Control kinds: knob (fader+dial) and ADSR (4 values).
+        let knobId = fresh.addControl(kind: .knob, pageId: 1)
+        let knob = fresh.control(id: knobId)
+        print("Knob: type=\(knob?.type ?? "?") variant=\(knob?.variant ?? "-") kind=\(knob?.kind.rawValue ?? "?")")
+        let adsrId = fresh.addControl(kind: .adsr, pageId: 1)
+        let adsr = fresh.control(id: adsrId)
+        let adsrVals = fresh.controlValues(id: adsrId)
+        print("ADSR: type=\(adsr?.type ?? "?") kind=\(adsr?.kind.rawValue ?? "?") valueCount=\(adsr?.valueCount ?? -1) values=\(adsrVals.map { "\($0.valueId):\($0.parameterNumber ?? -1)" }.joined(separator: ","))")
+        // Switch the knob to ADSR then back — structure must stay valid.
+        fresh.setControlKind(id: knobId, .adsr)
+        let switched = fresh.controlValues(id: knobId).count
+        fresh.setControlKind(id: knobId, .fader)
+        let collapsed = fresh.controlValues(id: knobId).count
+        print("Kind switch knob→adsr→fader value counts: \(switched) then \(collapsed)")
+        print("Re-parse after kind edits valid: \(PresetDocument(jsonString: fresh.jsonString()) != nil)")
         print("✓ doc self-test done")
     }
 
