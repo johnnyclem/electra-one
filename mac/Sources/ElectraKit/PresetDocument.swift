@@ -24,9 +24,9 @@ public struct PresetDocument {
 
     // ── Logical screen ─────────────────────────────────────────────────────
 
-    /// Electra One logical screen size (preset coordinate space).
-    public static let screenWidth: Double = 1024
-    public static let screenHeight: Double = 575
+    /// Electra One preset coordinate space — the full 6×6 slot grid extent.
+    public static let screenWidth: Double = SlotGeometry.canvasWidth
+    public static let screenHeight: Double = SlotGeometry.canvasHeight
 
     /// The six assignable Electra colors (plus white) for the palette picker.
     public static let palette: [String] = [
@@ -188,17 +188,11 @@ public struct PresetDocument {
         let newId = (controls.compactMap { $0["id"] as? Int }.max() ?? 0) + 1
         let dev = deviceId ?? (root["devices"] as? [[String: Any]])?.first?["id"] as? Int ?? 1
 
-        // Place into a 6-col × 4-row grid.
+        // Place into the next free slot on the 6×6 grid.
         let used = controls.filter { ($0["pageId"] as? Int) == pageId }.count
-        let cols = 6, rows = 4
-        let idx = used % (cols * rows)
-        let col = idx % cols, row = idx / cols
-        let cw = Self.screenWidth / Double(cols), rh = Self.screenHeight / Double(rows)
-        let bx = Int((Double(col) * cw + 10).rounded())
-        let by = Int((Double(row) * rh + 12).rounded())
-        let bw = Int((cw - 20).rounded())
-        let bh = Int((rh - 24).rounded())
-        let potId = (used % 12) + 1
+        let slot = (used % SlotGeometry.slotsPerPage) + 1
+        let (col, row) = SlotGeometry.cell(forSlot: slot)
+        let b = SlotGeometry.bounds(forSlot: slot)
 
         let control: [String: Any] = [
             "id": newId,
@@ -207,10 +201,10 @@ public struct PresetDocument {
             "visible": true,
             "name": "CC #\(newId)",
             "color": Self.palette[1 + (newId % (Self.palette.count - 1))],
-            "bounds": [bx, by, bw, bh],
+            "bounds": b.array,
             "pageId": pageId,
-            "controlSetId": 1,
-            "inputs": [["potId": potId, "valueId": "value"]],
+            "controlSetId": SlotGeometry.controlSet(forRow: row),
+            "inputs": [["potId": SlotGeometry.pot(col: col, row: row), "valueId": "value"]],
             "values": [[
                 "message": ["type": "cc7", "min": 0, "max": 127, "parameterNumber": newId, "deviceId": dev],
                 "defaultValue": 0,

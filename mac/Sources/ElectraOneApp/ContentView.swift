@@ -254,6 +254,16 @@ private struct PresetCanvas: View {
                     Rectangle().fill(Color.black)
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.08)))
                         .onTapGesture { model.selectedControlId = nil }
+                    // Control-set band dividers (the device pages through these).
+                    ForEach([2, 4], id: \.self) { row in
+                        let y = (SlotGeometry.originY + Double(row) * SlotGeometry.pitchY) * scale
+                        Path { p in p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: cw, y: y)) }
+                            .stroke(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                        Text("CS \(row / 2 + 1)")
+                            .font(.system(size: max(7, 9 * scale * 1.4)))
+                            .foregroundStyle(.white.opacity(0.25))
+                            .position(x: 16, y: y + 8)
+                    }
                     ForEach(model.currentControls) { control in
                         ControlCell(
                             control: control,
@@ -342,6 +352,18 @@ private struct ControlCell: View {
                 .stroke(color.opacity(0.7))
                 .overlay(Text("▾").font(.system(size: max(7, 9 * scale * 1.4))).foregroundStyle(color))
                 .frame(height: max(8, h * 0.35))
+        case "vfader": // vertical fader (level meter)
+            HStack {
+                Spacer()
+                GeometryReader { g in
+                    ZStack(alignment: .bottom) {
+                        Capsule().fill(Color.white.opacity(0.12))
+                        Capsule().fill(color).frame(height: g.size.height * fillFraction)
+                    }
+                }
+                .frame(width: max(4, 6 * scale * 1.4))
+                Spacer()
+            }
         default: // fader / dial / others
             VStack(spacing: 2) {
                 Spacer(minLength: 0)

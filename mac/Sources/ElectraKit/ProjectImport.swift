@@ -44,11 +44,7 @@ extension PresetDocument {
         var controls: [[String: Any]] = []
         for (i, tile) in tiles.enumerated() {
             let slotId = tile["slotId"] as? Int ?? (i + 1)
-            let within = (slotId - 1) % 36
-            let col = within % 6
-            let row = within / 6
-            let controlSetId = row / 2 + 1          // 6 rows → 3 control sets
-            let potId = (row % 2) * 6 + col + 1     // 1…12 within the control set
+            let (col, row) = SlotGeometry.cell(forSlot: slotId)
             let refId = tile["reference"] as? Int ?? (i + 1)
 
             var control: [String: Any] = [
@@ -56,11 +52,11 @@ extension PresetDocument {
                 "type": tile["type"] as? String ?? "fader",
                 "name": tile["name"] as? String ?? "",
                 "color": tile["color"] as? String ?? "FFFFFF",
-                "bounds": slotBounds(col: col, row: row),
+                "bounds": SlotGeometry.bounds(forSlot: slotId).array,
                 "pageId": pageId(forSlot: slotId),
-                "controlSetId": controlSetId,
+                "controlSetId": SlotGeometry.controlSet(forRow: row),
                 "visible": tile["visible"] as? Bool ?? true,
-                "inputs": [["potId": potId, "valueId": "value"]],
+                "inputs": [["potId": SlotGeometry.pot(col: col, row: row), "valueId": "value"]],
             ]
             if let v = tile["variant"] as? String, !v.isEmpty { control["variant"] = v }
             if let m = tile["mode"] as? String { control["mode"] = m }
@@ -98,18 +94,5 @@ extension PresetDocument {
         var doc = PresetDocument(root: root)
         if let lua = proj["lua"] as? String, !lua.isEmpty { doc.lua = lua }
         return doc
-    }
-
-    /// Pixel bounds for a 6×6 grid cell, approximating the Electra layout.
-    static func slotBounds(col: Int, row: Int) -> [Int] {
-        let leftMargin = 12.0, topMargin = 22.0, bottom = 8.0
-        let colW = (screenWidth - leftMargin * 2) / 6
-        let rowH = (screenHeight - topMargin - bottom) / 6
-        let padX = 7.0, padY = 8.0
-        let x = leftMargin + Double(col) * colW + padX
-        let y = topMargin + Double(row) * rowH + padY
-        let w = colW - padX * 2
-        let h = rowH - padY * 2
-        return [Int(x.rounded()), Int(y.rounded()), Int(w.rounded()), Int(h.rounded())]
     }
 }
