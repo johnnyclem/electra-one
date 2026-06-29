@@ -2,12 +2,14 @@ import Foundation
 import SwiftUI
 import ElectraKit
 
-/// UI state + orchestration. All published state lives on the main actor; the
-/// actual MIDI work happens on the `E1Device` actor.
+/// UI state + orchestration. Published state lives on the main actor; MIDI work
+/// happens on the `E1Device` actor. The app is document-centric: it always
+/// edits a `PresetDocument`, which may originate from the device, a file, or a
+/// fresh template. A device is optional — the editor works fully offline.
 @MainActor
 final class AppModel: ObservableObject {
     enum ConnectionState: Equatable {
-        case connecting, ready, failed(String)
+        case connecting, ready, offline(String)
     }
 
     let slotsPerBank = 12
@@ -15,26 +17,30 @@ final class AppModel: ObservableObject {
 
     private let device = E1Device()
 
+    // Device
     @Published var connection: ConnectionState = .connecting
     @Published var info: DeviceInfo?
     @Published var portName: String = ""
-
     @Published var bank: Int = 0
     @Published var slots: [SlotState] = []
-    @Published var selected: Int? = nil
+    @Published var openSlot: Int? = nil          // which device slot is loaded
 
-    @Published var summary: PresetSummary?
-    @Published var detailLoading = false
-    @Published var detailEmpty = false
+    // Open document
+    @Published var document: PresetDocument?
+    @Published var fileURL: URL?
+    @Published var deviceSlot: (bank: Int, slot: Int)?
+    @Published var dirty = false
+    @Published var currentPageId: Int = 1
+    @Published var selectedControlId: Int? = nil
 
+    // Status
     @Published var busy = false
     @Published var message: String = ""
 
-    // Editor sheet
-    @Published var editorPresented = false
-    @Published var editorText: String = ""
-    @Published var editorSlot: Int? = nil
-    @Published var editorError: String?
+    // Save-to-device sheet
+    @Published var savePickerPresented = false
+    @Published var saveBank = 0
+    @Published var saveSlot = 0
 
     private var scanToken = 0
 
@@ -42,7 +48,22 @@ final class AppModel: ObservableObject {
         slots = (0..<slotsPerBank).map { SlotState(slot: $0, status: .unknown) }
     }
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────
+    var isConnected: Bool { if case .ready = connection { return true }; return false }
+
+    var documentTitle: String {
+        guard let doc = document else { return "No preset open" }
+        return doc.name.isEmpty ? "(unnamed)" : doc.name
+    }
+
+    var subtitle: String {
+        var parts: [String] = []
+        if let s = deviceSlot { parts.append("bank \(s.bank) · slot \(s.slot)") }
+        if let u = fileURL { parts.append(u.lastPathComponent) }
+        if dirty { parts.append("• edited") }
+        return parts.joined(separator: "  ·  ")
+    }
+
+    // ── Connection (non-fatal) ─────────────────────────────────────────────
 
     func start() {
         Task {
@@ -53,27 +74,28 @@ final class AppModel: ObservableObject {
                 connection = .ready
                 rescan()
             } catch {
-                connection = .failed(describe(error))
+                connection = .offline(describe(error))
             }
         }
     }
 
-    func shutdown() {
-        Task { await device.disconnect() }
+    func reconnect() {
+        connection = .connecting
+        start()
     }
 
-    // ── Scanning ──────────────────────────────────────────────────────────
+    func shutdown() { Task { await device.disconnect() } }
+
+    // ── Device browser ───────────────────────────────────────────────────
 
     func setBank(_ newBank: Int) {
         guard newBank != bank, newBank >= 0, newBank < bankCount else { return }
         bank = newBank
-        selected = nil
-        summary = nil
-        detailEmpty = false
         rescan()
     }
 
     func rescan() {
+        guard isConnected else { return }
         scanToken += 1
         let token = scanToken
         let targetBank = bank
@@ -81,87 +103,29 @@ final class AppModel: ObservableObject {
         Task {
             for slot in 0..<slotsPerBank {
                 let result = await device.scanSlot(bank: targetBank, slot: slot)
-                if token != scanToken { return }  // a newer scan started
+                if token != scanToken { return }
                 slots[slot] = result
             }
             if token == scanToken { message = "Scanned bank \(targetBank)." }
         }
     }
 
-    // ── Detail ────────────────────────────────────────────────────────────
-
-    func select(_ slot: Int) {
-        selected = slot
-        loadDetail(slot)
-    }
-
-    func loadDetail(_ slot: Int) {
-        detailLoading = true
-        detailEmpty = false
-        summary = nil
-        let targetBank = bank
-        Task {
-            do {
-                let s = try await device.summarize(bank: targetBank, slot: slot)
-                if selected == slot { summary = s; message = "Viewing \"\(s.name)\"." }
-            } catch let e as E1Error where isEmpty(e) {
-                if selected == slot { detailEmpty = true }
-            } catch {
-                if selected == slot { message = "Error: \(describe(error))" }
-            }
-            if selected == slot { detailLoading = false }
-        }
-    }
-
-    // ── Operations ────────────────────────────────────────────────────────
-
-    func download(_ slot: Int) {
-        let targetBank = bank
-        run("Downloading slot \(slot)…") {
-            let pretty = try await self.device.getPresetPretty(bank: targetBank, slot: slot)
-            let name = PresetNaming.fileName(for: E1Device.summarize(text: pretty)?.name)
-            return await MainActor.run { self.savePanel(suggested: name, contents: pretty) }
-        }
-    }
-
-    func activate(_ slot: Int) {
-        let targetBank = bank
-        run("Activating bank \(targetBank), slot \(slot)…") {
-            try await self.device.switchSlot(bank: targetBank, slot: slot)
-            return "Activated bank \(targetBank), slot \(slot) on device."
-        }
-    }
-
-    func upload(file: URL, to slot: Int) {
-        let targetBank = bank
-        run("Uploading \(file.lastPathComponent) → slot \(slot)…") {
-            let text = try String(contentsOf: file, encoding: .utf8)
-            guard let data = text.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  obj["name"] != nil, obj["controls"] != nil
-            else { throw E1Error.decode("File does not look like an Electra preset (missing name/controls).") }
-            try await self.device.putPreset(json: text, bank: targetBank, slot: slot)
-            self.rescan()
-            return "Uploaded \"\(obj["name"] as? String ?? "preset")\" → bank \(targetBank), slot \(slot)."
-        }
-    }
-
-    // ── Editing ───────────────────────────────────────────────────────────
-
-    func beginEdit(_ slot: Int) {
+    func openFromSlot(_ slot: Int) {
+        guard isConnected else { return }
+        openSlot = slot
         let targetBank = bank
         busy = true
-        message = "Loading slot \(slot) for editing…"
+        message = "Loading bank \(targetBank), slot \(slot)…"
         Task {
             do {
-                let pretty = try await device.getPresetPretty(bank: targetBank, slot: slot)
-                editorText = pretty
-                editorSlot = slot
-                editorError = nil
-                editorPresented = true
-                message = ""
+                let raw = try await device.getPresetRaw(bank: targetBank, slot: slot)
+                guard let doc = PresetDocument(jsonString: raw) else {
+                    throw E1Error.decode("This slot's data isn't valid preset JSON.")
+                }
+                loadDocument(doc, fileURL: nil, deviceSlot: (targetBank, slot))
+                message = "Opened \"\(doc.name)\"."
             } catch let e as E1Error where isEmpty(e) {
-                message = "Slot is empty — nothing to edit."
+                message = "Slot \(slot) is empty. Use New Preset to build one, then Save to Device."
             } catch {
                 message = "Error: \(describe(error))"
             }
@@ -169,55 +133,149 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func saveEdit() {
-        guard let slot = editorSlot else { return }
-        let text = editorText
-        let targetBank = bank
-        // Validate before sending.
-        guard let data = text.data(using: .utf8),
-              (try? JSONSerialization.jsonObject(with: data)) != nil else {
-            editorError = "Invalid JSON — fix it before saving."
-            return
-        }
-        editorError = nil
-        editorPresented = false
-        run("Saving edits → bank \(targetBank), slot \(slot)…") {
-            try await self.device.putPreset(json: text, bank: targetBank, slot: slot)
-            self.rescan()
-            if self.selected == slot { self.loadDetail(slot) }
-            return "Saved edits → bank \(targetBank), slot \(slot)."
+    // ── Document lifecycle ──────────────────────────────────────────────────
+
+    private func loadDocument(_ doc: PresetDocument, fileURL: URL?, deviceSlot: (Int, Int)?) {
+        document = doc
+        self.fileURL = fileURL
+        self.deviceSlot = deviceSlot.map { (bank: $0.0, slot: $0.1) }
+        currentPageId = doc.pages.first?.id ?? 1
+        selectedControlId = nil
+        dirty = false
+    }
+
+    func newDocument() {
+        loadDocument(.newPreset(), fileURL: nil, deviceSlot: nil)
+        openSlot = nil
+        message = "New preset."
+    }
+
+    func openFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            guard let doc = PresetDocument(jsonString: text) else {
+                message = "Error: not a valid preset JSON file."
+                return
+            }
+            loadDocument(doc, fileURL: url, deviceSlot: nil)
+            openSlot = nil
+            message = "Opened \(url.lastPathComponent)."
+        } catch {
+            message = "Error: \(error.localizedDescription)"
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────
+    func saveToFile() {
+        guard let doc = document else { return }
+        let url: URL
+        if let existing = fileURL {
+            url = existing
+        } else {
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.json]
+            panel.nameFieldStringValue = PresetNaming.fileName(for: doc.name)
+            panel.canCreateDirectories = true
+            guard panel.runModal() == .OK, let chosen = panel.url else { return }
+            url = chosen
+        }
+        do {
+            try doc.jsonString(pretty: true).write(to: url, atomically: true, encoding: .utf8)
+            fileURL = url
+            dirty = false
+            message = "Saved → \(url.path)"
+        } catch {
+            message = "Save failed: \(error.localizedDescription)"
+        }
+    }
 
-    /// Run an async operation with busy/status handling. The closure returns a
-    /// status string to display on success.
+    func saveToFileAs() {
+        fileURL = nil
+        saveToFile()
+    }
+
+    func presentSaveToDevice() {
+        guard document != nil else { return }
+        if let s = deviceSlot { saveBank = s.bank; saveSlot = s.slot }
+        else { saveBank = bank; saveSlot = 0 }
+        savePickerPresented = true
+    }
+
+    func confirmSaveToDevice() {
+        savePickerPresented = false
+        guard isConnected, let doc = document else {
+            message = "Connect an Electra One to save to the device."
+            return
+        }
+        let json = doc.jsonString(pretty: false)
+        let b = saveBank, s = saveSlot
+        run("Uploading \"\(doc.name)\" → bank \(b), slot \(s)…") {
+            try await self.device.putPreset(json: json, bank: b, slot: s)
+            self.deviceSlot = (bank: b, slot: s)
+            self.dirty = false
+            if self.bank == b { self.rescan() }
+            return "Saved \"\(doc.name)\" → bank \(b), slot \(s)."
+        }
+    }
+
+    // ── Editing ─────────────────────────────────────────────────────────────
+
+    var currentControls: [PresetDocument.Control] {
+        document?.controls(onPage: currentPageId) ?? []
+    }
+
+    var selectedControl: PresetDocument.Control? {
+        guard let id = selectedControlId else { return nil }
+        return document?.control(id: id)
+    }
+
+    private func edit(_ body: (inout PresetDocument) -> Void) {
+        guard var doc = document else { return }
+        body(&doc)
+        document = doc
+        dirty = true
+    }
+
+    func setControlName(_ id: Int, _ name: String) { edit { $0.setControlName(id: id, name) } }
+    func setControlColor(_ id: Int, hex: String) { edit { $0.setControlColor(id: id, hex: hex) } }
+    func setControlType(_ id: Int, _ type: String) { edit { $0.setControlType(id: id, type) } }
+    func setControlParameterNumber(_ id: Int, _ n: Int) { edit { $0.setMessageParameterNumber(id: id, n) } }
+    func setControlMessageType(_ id: Int, _ t: String) { edit { $0.setMessageType(id: id, t) } }
+
+    func setControlBounds(_ id: Int, x: Double, y: Double, w: Double, h: Double) {
+        edit { $0.setControlBounds(id: id, x: x, y: y, w: w, h: h) }
+    }
+
+    func setPresetName(_ name: String) { edit { $0.name = name } }
+    func renamePage(_ id: Int, _ name: String) { edit { $0.renamePage(id: id, to: name) } }
+
+    func addControl() {
+        edit { doc in
+            let newId = doc.addControl(pageId: currentPageId)
+            DispatchQueue.main.async { self.selectedControlId = newId }
+        }
+        message = "Added control."
+    }
+
+    func deleteSelectedControl() {
+        guard let id = selectedControlId else { return }
+        edit { $0.removeControl(id: id) }
+        selectedControlId = nil
+        message = "Deleted control."
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+
     private func run(_ msg: String, _ op: @escaping () async throws -> String) {
         busy = true
         message = msg
         Task {
-            do {
-                let done = try await op()
-                message = done
-            } catch {
-                message = "Error: \(describe(error))"
-            }
+            do { message = try await op() }
+            catch { message = "Error: \(describe(error))" }
             busy = false
-        }
-    }
-
-    private func savePanel(suggested: String, contents: String) -> String {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = suggested
-        panel.canCreateDirectories = true
-        panel.allowedContentTypes = [.json]
-        guard panel.runModal() == .OK, let url = panel.url else { return "Download cancelled." }
-        do {
-            try contents.write(to: url, atomically: true, encoding: .utf8)
-            return "Saved → \(url.path)"
-        } catch {
-            return "Save failed: \(error.localizedDescription)"
         }
     }
 
@@ -234,10 +292,8 @@ final class AppModel: ObservableObject {
 
 enum PresetNaming {
     static func fileName(for name: String?) -> String {
-        let base = (name ?? "preset")
-            .trimmingCharacters(in: .whitespaces)
+        let base = (name ?? "preset").trimmingCharacters(in: .whitespaces)
             .replacingOccurrences(of: "/", with: "_")
-        let safe = base.isEmpty ? "preset" : base
-        return "\(safe).json"
+        return "\(base.isEmpty ? "preset" : base).json"
     }
 }
