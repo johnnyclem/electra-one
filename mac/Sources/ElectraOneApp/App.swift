@@ -22,9 +22,30 @@ struct ElectraOneApp: App {
                 .onAppear { model.start() }
         }
         .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Preset") { model.newDocument() }
+                    .keyboardShortcut("n", modifiers: .command)
+                Button("Open…") { model.openFile() }
+                    .keyboardShortcut("o", modifiers: .command)
+            }
+            CommandGroup(replacing: .saveItem) {
+                Button("Save") { model.saveToFile() }
+                    .keyboardShortcut("s", modifiers: .command)
+                    .disabled(model.document == nil)
+                Button("Save As…") { model.saveToFileAs() }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
+                    .disabled(model.document == nil)
+                Button("Save to Device…") { model.presentSaveToDevice() }
+                    .keyboardShortcut("d", modifiers: .command)
+                    .disabled(model.document == nil || !model.isConnected)
+            }
             CommandGroup(after: .toolbar) {
                 Button("Rescan Bank") { model.rescan() }
                     .keyboardShortcut("r", modifiers: .command)
+                    .disabled(!model.isConnected)
+                Button("Add Control") { model.addControl() }
+                    .keyboardShortcut("k", modifiers: .command)
+                    .disabled(model.document == nil)
             }
         }
     }

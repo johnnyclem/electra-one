@@ -1,8 +1,25 @@
 # Electra One — native macOS app
 
-A SwiftUI app that connects to a USB Electra One over CoreMIDI and lets you
-browse, view, download, edit, upload, and activate presets. Same protocol as
-the Node CLI/TUI in the repo root, reimplemented natively (no Node required).
+A SwiftUI **visual preset editor** for the Electra One. Renders presets like the
+device screen (pages, controls laid out by their bounds/color/type), and lets
+you build and edit them **with or without hardware connected**. When a device
+is attached over USB it also browses, loads, and saves presets on it. Same
+protocol as the Node CLI/TUI in the repo root, reimplemented natively over
+CoreMIDI (no Node required).
+
+## What it does
+
+- **Visual editor** — a black "screen" canvas draws each control at its real
+  `bounds` with its color and a type-specific graphic (fader bar, pad, list).
+  Page tabs switch pages. Drag a control to reposition it.
+- **Inspector** — select a control to edit its name, color (Electra palette),
+  type, MIDI message (cc7/cc14/nrpn/note/program/…), parameter number, and
+  exact position. Add/delete controls. Rename the preset and pages.
+- **Offline** — New Preset / Open File… work with no device. Save to a `.json`
+  file. Editing preserves every field of the original JSON, so round-tripping
+  never corrupts a preset.
+- **With a device** — browse banks/slots, click a slot to open it in the
+  editor, and Save to Device (pick bank/slot) to upload.
 
 ## Build & run
 
