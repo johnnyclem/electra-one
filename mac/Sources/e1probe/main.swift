@@ -1,11 +1,36 @@
 import ElectraKit
+import LuaKit
 import Foundation
 
 @main
 struct Probe {
     static func main() async {
+        if CommandLine.arguments.contains("lua") { luaSelfTest(); return }
         if CommandLine.arguments.contains("doc") { docSelfTest(); return }
         await probeDevice()
+    }
+
+    static func luaSelfTest() {
+        let lua = LuaEngine()
+        let r1 = lua.run(#"print("hello", 1 + 2)"#)
+        print("1) print: ok=\(r1.ok) out=\(r1.output.debugDescription)")
+
+        let r2 = lua.run(#"""
+        local c = controls.get(13)
+        c:setColor(RED)
+        parameterMap.set(1, PT_CC7, 5, 100)
+        print("electra api ran")
+        """#)
+        print("2) electra mock: ok=\(r2.ok) out=\(r2.output.debugDescription) err=\(r2.error ?? "-")")
+
+        print("3) syntax check 'print(': \(lua.check("print(") ?? "OK")")
+
+        let r4 = lua.run("while true do end")
+        print("4) loop guard: ok=\(r4.ok) err=\(r4.error ?? "-")")
+
+        let r5 = lua.run(#"function onReady() print("ready!") end"#)
+        print("5) entrypoint: ok=\(r5.ok) out=\(r5.output.debugDescription)")
+        print("✓ lua self-test done")
     }
 
     /// Offline model check — no device needed.

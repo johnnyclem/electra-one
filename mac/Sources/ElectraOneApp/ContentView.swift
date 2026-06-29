@@ -50,24 +50,29 @@ struct ContentView: View {
             Sidebar().navigationSplitViewColumnWidth(min: 240, ideal: 270)
         } detail: {
             Group {
-                if model.document == nil {
-                    WelcomeView()
-                } else {
-                    VStack(spacing: 0) {
-                        EditorHeader()
-                        Divider()
-                        HStack(spacing: 0) {
-                            VStack(spacing: 0) {
-                                DeviceCanvas(zoom: $zoom, showGrid: $showGrid, snapToGrid: $snapToGrid, multiSelection: $multiSelection)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    .background(ElectraTheme.background)
-                                BottomBar(zoom: $zoom, showGrid: $showGrid, snapToGrid: $snapToGrid)
+                switch model.editorMode {
+                case .script:
+                    ScriptEditor()
+                case .design:
+                    if model.document == nil {
+                        WelcomeView()
+                    } else {
+                        VStack(spacing: 0) {
+                            EditorHeader()
+                            Divider()
+                            HStack(spacing: 0) {
+                                VStack(spacing: 0) {
+                                    DeviceCanvas(zoom: $zoom, showGrid: $showGrid, snapToGrid: $snapToGrid, multiSelection: $multiSelection)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                        .background(ElectraTheme.background)
+                                    BottomBar(zoom: $zoom, showGrid: $showGrid, snapToGrid: $snapToGrid)
+                                }
+                                Divider()
+                                Inspector(multiSelection: $multiSelection).frame(width: 300)
                             }
                             Divider()
-                            Inspector(multiSelection: $multiSelection).frame(width: 300)
+                            StatusBar()
                         }
-                        Divider()
-                        StatusBar()
                     }
                 }
             }
@@ -91,6 +96,13 @@ struct ContentView: View {
         ToolbarItemGroup(placement: .navigation) {
             Button { model.newDocument() } label: { Label("New", systemImage: "doc.badge.plus") }
             Button { model.openFile() } label: { Label("Open", systemImage: "folder") }
+        }
+        ToolbarItem(placement: .principal) {
+            Picker("", selection: $model.editorMode) {
+                Text("Design").tag(AppModel.EditorMode.design)
+                Text("Script").tag(AppModel.EditorMode.script)
+            }
+            .pickerStyle(.segmented).frame(width: 170)
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button { model.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
@@ -834,6 +846,113 @@ private struct StatusBar: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
         .background(ElectraTheme.surface)
+    }
+}
+
+// MARK: - Lua script editor
+
+private struct ScriptEditor: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            toolbar
+            Divider()
+            VSplitView {
+                CodeEditor(text: Binding(get: { model.luaSource }, set: { model.setLuaSource($0) }))
+                    .frame(minHeight: 180)
+                ConsolePane(text: model.luaConsole) { model.clearConsole() }
+                    .frame(minHeight: 120)
+            }
+        }
+        .background(ElectraTheme.background)
+    }
+
+    private var toolbar: some View {
+        HStack(spacing: 10) {
+            Button { model.luaBuild() } label: { Label("Build", systemImage: "hammer") }
+            Button { model.luaRun() } label: { Label("Run", systemImage: "play.fill") }
+                .buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
+            Divider().frame(height: 16)
+            Button { model.importLua() } label: { Label("Import…", systemImage: "square.and.arrow.down") }
+            Button { model.exportLua() } label: { Label("Export…", systemImage: "square.and.arrow.up") }
+            Button { model.presentSaveToDevice() } label: { Label("Push to Device", systemImage: "arrow.up.circle") }
+                .disabled(model.document == nil || !model.isConnected)
+            Spacer()
+            if let doc = model.document {
+                Text("attached to “\(doc.name.isEmpty ? "preset" : doc.name)”")
+                    .font(.caption).foregroundStyle(ElectraTheme.textTertiary)
+            } else {
+                Text("scratch — open or create a preset to push to device")
+                    .font(.caption).foregroundStyle(ElectraTheme.textTertiary)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(ElectraTheme.surface)
+    }
+}
+
+/// A monospaced code editor with a simple line-number gutter.
+private struct CodeEditor: View {
+    @Binding var text: String
+
+    var body: some View {
+        ScrollView([.vertical]) {
+            HStack(alignment: .top, spacing: 0) {
+                gutter
+                TextEditor(text: $text)
+                    .font(.system(size: 12, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .background(Color.black)
+                    .frame(minHeight: 400, alignment: .topLeading)
+            }
+        }
+        .background(Color.black)
+    }
+
+    private var gutter: some View {
+        let lines = max(1, text.components(separatedBy: "\n").count)
+        return VStack(alignment: .trailing, spacing: 0) {
+            ForEach(1...lines, id: \.self) { n in
+                Text("\(n)")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.25))
+                    .frame(height: 15.5, alignment: .trailing)
+            }
+        }
+        .padding(.top, 8).padding(.horizontal, 8)
+        .background(Color.white.opacity(0.03))
+    }
+}
+
+private struct ConsolePane: View {
+    let text: String
+    let onClear: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("CONSOLE").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
+                Spacer()
+                Button { onClear() } label: { Label("Clear", systemImage: "trash") }
+                    .buttonStyle(.borderless).controlSize(.small)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(text.isEmpty ? "— output appears here —" : text)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(text.isEmpty ? ElectraTheme.textTertiary : .white.opacity(0.9))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .padding(10)
+                    Color.clear.frame(height: 1).id("bottom")
+                }
+                .onChange(of: text) { _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            }
+        }
+        .background(Color(red: 0.08, green: 0.08, blue: 0.09))
     }
 }
 

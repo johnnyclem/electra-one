@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 import ElectraKit
+import LuaKit
 
 /// UI state + orchestration. Published state lives on the main actor; MIDI work
 /// happens on the `E1Device` actor. The app is document-centric: it always
@@ -37,6 +38,24 @@ final class AppModel: ObservableObject {
     // Status
     @Published var busy = false
     @Published var message: String = ""
+
+    // ── Lua script editor ────────────────────────────────────────────────────
+    enum EditorMode { case design, script }
+    @Published var editorMode: EditorMode = .design
+    @Published var luaSource: String = AppModel.sampleScript
+    @Published var luaConsole: String = ""
+    private let lua = LuaEngine()
+
+    static let sampleScript = """
+    -- Electra One Lua. Build to syntax-check, Run to preview here.
+    -- Device APIs (controls, midi, parameterMap, timer, …) are mocked offline.
+    print("Hello from Electra One!")
+
+    function onReady()
+      print("controller:", controller.getModel())
+      info.setText("ready")
+    end
+    """
 
     // Save-to-device sheet
     @Published var savePickerPresented = false
@@ -183,6 +202,73 @@ final class AppModel: ObservableObject {
         undoStack.removeAll()
         redoStack.removeAll()
         refreshUndoFlags()
+        if let l = doc.lua, !l.isEmpty { luaSource = l }
+    }
+
+    // ── Lua editor actions ───────────────────────────────────────────────────
+
+    /// Edit the script. Kept in sync with the open preset's Lua (no undo entry)
+    /// so Save / Push to Device include it automatically.
+    func setLuaSource(_ s: String) {
+        luaSource = s
+        if var d = document {
+            d.lua = s.isEmpty ? nil : s
+            document = d
+            dirty = true
+        }
+    }
+
+    func luaBuild() {
+        if let err = lua.check(luaSource) {
+            appendConsole("✗ Build failed:\n\(err)")
+        } else {
+            appendConsole("✓ Build OK — no syntax errors.")
+        }
+    }
+
+    func luaRun() {
+        appendConsole("▶ Run")
+        let result = lua.run(luaSource)
+        if !result.output.isEmpty { appendConsole(result.output, raw: true) }
+        if let err = result.error {
+            appendConsole("✗ \(err)")
+        } else {
+            appendConsole("✓ finished")
+        }
+    }
+
+    func clearConsole() { luaConsole = "" }
+
+    func importLua() {
+        let panel = NSOpenPanel()
+        var types: [UTType] = []
+        if let lua = UTType(filenameExtension: "lua") { types.append(lua) }
+        types.append(.plainText)
+        panel.allowedContentTypes = types
+        panel.allowsOtherFileTypes = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            setLuaSource(try String(contentsOf: url, encoding: .utf8))
+            message = "Imported \(url.lastPathComponent)."
+        } catch {
+            message = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    func exportLua() {
+        let panel = NSSavePanel()
+        if let lua = UTType(filenameExtension: "lua") { panel.allowedContentTypes = [lua] }
+        panel.nameFieldStringValue = "\(document?.name.isEmpty == false ? document!.name : "script").lua"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try luaSource.write(to: url, atomically: true, encoding: .utf8)
+            message = "Saved → \(url.path)"
+        } catch { message = "Save failed: \(error.localizedDescription)" }
+    }
+
+    private func appendConsole(_ text: String, raw: Bool = false) {
+        if !luaConsole.isEmpty { luaConsole += "\n" }
+        luaConsole += raw ? text : text
     }
 
     func newDocument() {

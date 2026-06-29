@@ -60,6 +60,23 @@ struct ElectraOneApp: App {
                 .keyboardShortcut("d", modifiers: .command)
                 .disabled(model.selectedControlId == nil)
             }
+            CommandGroup(after: .sidebar) {
+                Button("Design Mode") { model.editorMode = .design }
+                    .keyboardShortcut("1", modifiers: .command)
+                Button("Script Mode") { model.editorMode = .script }
+                    .keyboardShortcut("2", modifiers: .command)
+            }
+            CommandMenu("Script") {
+                Button("Build") { model.luaBuild() }
+                    .keyboardShortcut("b", modifiers: .command)
+                    .disabled(model.editorMode != .script)
+                Button("Run") { model.luaRun() }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(model.editorMode != .script)
+                Divider()
+                Button("Import Lua…") { model.importLua() }
+                Button("Export Lua…") { model.exportLua() }
+            }
         }
     }
 }
