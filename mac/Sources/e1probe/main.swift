@@ -30,6 +30,12 @@ struct Probe {
 
         let r5 = lua.run(#"function onReady() print("ready!") end"#)
         print("5) entrypoint: ok=\(r5.ok) out=\(r5.output.debugDescription)")
+
+        let r6 = lua.simulate(#"""
+        info.setText("patch 12")
+        print("model:", controller.getModel())
+        """#)
+        print("6) simulator: ok=\(r6.ok) bottom=\(r6.bottomText.debugDescription) out=\(r6.output.debugDescription)")
         print("✓ lua self-test done")
     }
 

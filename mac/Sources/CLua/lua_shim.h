@@ -19,6 +19,11 @@ void clua_close(lua_State *L);
  * -1 on a compile/runtime error. */
 int clua_run(lua_State *L, const char *src);
 
+/* Read a global string variable into `out` (NUL-terminated, truncated to `cap`).
+ * Returns 1 if the global was a string, 0 otherwise. Used by the simulator to
+ * pull back observable state (e.g. the `__sim_bottom` status-bar text). */
+int clua_global_string(lua_State *L, const char *name, char *out, size_t cap);
+
 /* Syntax-check only (no execution). Returns 0 if it compiles, else -1 and
  * writes the error message. Uses a throwaway state. */
 int clua_check(const char *src, clua_writer w, void *ctx);

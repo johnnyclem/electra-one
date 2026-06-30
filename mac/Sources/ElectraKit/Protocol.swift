@@ -15,7 +15,8 @@ public enum E1Proto {
         static let request: UInt8 = 0x02
         static let response: UInt8 = 0x01
         static let remove: UInt8 = 0x05
-        static let selectSlot: UInt8 = 0x14
+        static let switchActive: UInt8 = 0x09   // "Switch" — activates/loads a resource
+        static let selectSlot: UInt8 = 0x14     // "updateRuntime" — Set Preset Slot only arms it
         static let ackNack: UInt8 = 0x7E
     }
 
@@ -59,9 +60,16 @@ public enum E1Proto {
         return [sox] + manufacturer + [Op.upload, Res.preset] + body + [eox]
     }
 
-    /// "Set preset slot" — arm the given bank/slot as the active target.
+    /// "Set preset slot" (op `0x14`, res `0x08`) — arm the given bank/slot as the
+    /// target for subsequent file operations. Does NOT load the preset.
     public static func presetSlotSelect(bank: Int, slot: Int) -> [UInt8] {
         frame(Op.selectSlot, 0x08, UInt8(bank), UInt8(slot))
+    }
+
+    /// "Switch preset slot" (op `0x09`, res `0x08`) — make the slot active and
+    /// load its preset (the controller switches to display/run it).
+    public static func presetSlotSwitch(bank: Int, slot: Int) -> [UInt8] {
+        frame(Op.switchActive, 0x08, UInt8(bank), UInt8(slot))
     }
 
     /// Upload a Lua script to the active slot (op `0x01`, resource `0x0C`).

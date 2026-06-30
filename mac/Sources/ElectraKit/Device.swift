@@ -80,8 +80,16 @@ public actor E1Device {
         }
     }
 
+    /// Arm a slot as the target for subsequent uploads (does not load it).
     public func switchSlot(bank: Int, slot: Int) async throws {
         try await transport.command(E1Proto.presetSlotSelect(bank: bank, slot: slot))
+    }
+
+    /// Activate a slot: the controller switches to it and loads its preset (and
+    /// any associated Lua / overrides / performance). Use after an upload to make
+    /// the just-written preset the live one.
+    public func activateSlot(bank: Int, slot: Int) async throws {
+        try await transport.command(E1Proto.presetSlotSwitch(bank: bank, slot: slot))
     }
 
     /// Permanently clear a preset slot on the device (preset + Lua). Frees a

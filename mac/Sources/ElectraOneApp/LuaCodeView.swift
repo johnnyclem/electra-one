@@ -19,6 +19,16 @@ struct LuaCodeView: NSViewRepresentable {
         textView.backgroundColor = LuaTheme.background
         textView.insertionPointColor = .white
         textView.textColor = LuaTheme.plain
+        // macOS 14+ defaults `usesAdaptiveColorMappingForDarkAppearance` to true:
+        // under the app's dark appearance it remaps our custom colors so the dark
+        // background is lightened to ~our text color, making the light text vanish
+        // (light-on-light). That was the "line numbers show but text is invisible"
+        // bug. We manage colors ourselves, so opt out.
+        if #available(macOS 14.0, *) {
+            textView.usesAdaptiveColorMappingForDarkAppearance = false
+        }
+        // Keep freshly-typed characters in the visible foreground color too.
+        textView.typingAttributes = [.font: LuaTheme.font, .foregroundColor: LuaTheme.plain]
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false

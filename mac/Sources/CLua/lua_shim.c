@@ -30,7 +30,9 @@ static void l_hook(lua_State *L, lua_Debug *ar) {
 /* ── permissive Electra-API mock ──────────────────────────────────────────────
  * Any undefined global resolves to a benign callable/indexable proxy so scripts
  * that drive the device API run without 'attempt to index nil' errors. print and
- * the standard libraries are real. */
+ * the standard libraries are real. A few high-value modules (info, controller)
+ * are mocked concretely so the in-app simulator can observe their effects:
+ * info.setText records the bottom-bar text into `__sim_bottom`. */
 static const char *PREAMBLE =
 "local function mock(name)\n"
 "  local t = {}\n"
@@ -54,7 +56,21 @@ static const char *PREAMBLE =
 "setmetatable(_G, { __index = function(_, k) return mock(k) end })\n"
 /* a few commonly-read constants scripts compare against */
 "PORT_1=1 PORT_2=2 PORT_CTRL=3 USB_DEV=0 USB_HOST=1 MIDI_IO=2\n"
-"RED='RED' ORANGE='ORANGE' YELLOW='YELLOW' GREEN='GREEN' BLUE='BLUE' PURPLE='PURPLE' WHITE='WHITE'\n";
+"RED='RED' ORANGE='ORANGE' YELLOW='YELLOW' GREEN='GREEN' BLUE='BLUE' PURPLE='PURPLE' WHITE='WHITE'\n"
+/* ── simulator-observable modules ───────────────────────────────────────────── */
+"__sim_bottom = nil\n"
+"info = setmetatable({\n"
+"  setText = function(s) __sim_bottom = tostring(s); print('info.setText: '..tostring(s)) end,\n"
+"}, { __index = function() return function() end end })\n"
+"controller = setmetatable({\n"
+"  getModel = function() return 'mk2' end,\n"
+"  getNumModel = function() return 2 end,\n"
+"  getFirmwareVersion = function() return '4.0.0' end,\n"
+"  getFirmwareNumVersion = function() return 400000000 end,\n"
+"  uptime = function() return 0 end,\n"
+"  isRequired = function() return true end,\n"
+"  require = function() return true end,\n"
+"}, { __index = function() return function() end end })\n";
 
 static void install_print(lua_State *L, clua_writer w, void *ctx) {
     lua_pushlightuserdata(L, (void *)w);
@@ -113,6 +129,24 @@ int clua_run(lua_State *L, const char *src) {
         }
     }
     return 0;
+}
+
+int clua_global_string(lua_State *L, const char *name, char *out, size_t cap) {
+    if (!L || !name || !out || cap == 0) return 0;
+    lua_getglobal(L, name);
+    int found = 0;
+    if (lua_isstring(L, -1)) {
+        size_t len = 0;
+        const char *s = lua_tolstring(L, -1, &len);
+        if (s) {
+            if (len >= cap) len = cap - 1;
+            memcpy(out, s, len);
+            out[len] = '\0';
+            found = 1;
+        }
+    }
+    lua_pop(L, 1);
+    return found;
 }
 
 int clua_check(const char *src, clua_writer w, void *ctx) {

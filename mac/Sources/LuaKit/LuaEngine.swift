@@ -30,15 +30,41 @@ public final class LuaEngine {
 
     /// Compile + run, capturing print output and any error.
     public func run(_ source: String) -> RunResult {
+        simulate(source).run
+    }
+
+    /// Result of a simulator run: the script output plus observable device state
+    /// (the status-bar text the script set via `info.setText`).
+    public struct SimResult: Sendable {
+        public var output: String
+        public var error: String?
+        public var bottomText: String?
+        public var ok: Bool { error == nil }
+        var run: RunResult { RunResult(output: output, error: error) }
+    }
+
+    /// Compile + run in the mocked Electra environment, capturing print output,
+    /// any error, and the simulated status-bar text. This is what the in-app
+    /// "Run" simulator uses.
+    public func simulate(_ source: String) -> SimResult {
         let sink = Sink()
         let ctx = Unmanaged.passUnretained(sink).toOpaque()
         guard let L = clua_new(Self.writer, ctx) else {
-            return RunResult(output: "", error: "could not create Lua state")
+            return SimResult(output: "", error: "could not create Lua state", bottomText: nil)
         }
         defer { clua_close(L) }
         let rc = source.withCString { clua_run(L, $0) }
+
+        // Pull back observable state regardless of success (a script may set the
+        // status bar before erroring later).
+        var bottom: String? = nil
+        var buf = [CChar](repeating: 0, count: 256)
+        if clua_global_string(L, "__sim_bottom", &buf, buf.count) == 1 {
+            bottom = String(cString: buf)
+        }
+
         if rc == 0 {
-            return RunResult(output: sink.text, error: nil)
+            return SimResult(output: sink.text, error: nil, bottomText: bottom)
         } else {
             // The error message was written into the sink as the final line.
             var text = sink.text
@@ -46,7 +72,7 @@ public final class LuaEngine {
             let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
             let error = lines.last?.trimmingCharacters(in: .whitespaces)
             let output = lines.dropLast().joined(separator: "\n")
-            return RunResult(output: output, error: (error?.isEmpty == false) ? error : "error")
+            return SimResult(output: output, error: (error?.isEmpty == false) ? error : "error", bottomText: bottom)
         }
     }
 

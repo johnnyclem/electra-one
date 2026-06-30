@@ -46,6 +46,10 @@ final class AppModel: ObservableObject {
     @Published var luaConsole: String = ""
     private let lua = LuaEngine()
 
+    // Built-in simulator (Run)
+    @Published var simulatorPresented = false
+    @Published var simBottomText: String = ""
+
     // AI script generation
     @Published var aiPrompt: String = ""
     @Published var aiBusy = false
@@ -231,6 +235,7 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// "Build" — compile-check only; reports syntax errors without running.
     func luaBuild() {
         if let err = lua.check(luaSource) {
             appendConsole("✗ Build failed:\n\(err)")
@@ -239,15 +244,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// "Run" — build, then execute the script in the in-app simulator (the Lua
+    /// runs against a mocked Electra environment) and open the simulator window
+    /// showing the preset screen, the status-bar text the script set, and the
+    /// console output.
     func luaRun() {
-        appendConsole("▶ Run")
-        let result = lua.run(luaSource)
+        // A syntax error means there's nothing to run — surface it and stop.
+        if let err = lua.check(luaSource) {
+            appendConsole("▶ Run — build failed:\n\(err)")
+            simBottomText = ""
+            simulatorPresented = true
+            return
+        }
+        appendConsole("▶ Run — launching simulator…")
+        let result = lua.simulate(luaSource)
         if !result.output.isEmpty { appendConsole(result.output, raw: true) }
         if let err = result.error {
             appendConsole("✗ \(err)")
         } else {
             appendConsole("✓ finished")
         }
+        simBottomText = result.bottomText ?? ""
+        simulatorPresented = true
     }
 
     func clearConsole() { luaConsole = "" }
@@ -412,8 +430,15 @@ final class AppModel: ObservableObject {
         saveToFile()
     }
 
+    /// Whether "Push to Device" is available: a connected device plus something
+    /// to push — either an open preset or a non-empty script (which we wrap in a
+    /// minimal preset).
+    var canPushToDevice: Bool {
+        isConnected && (document != nil || !luaSource.isEmpty)
+    }
+
     func presentSaveToDevice() {
-        guard document != nil else { return }
+        guard document != nil || !luaSource.isEmpty else { return }
         if let s = deviceSlot { saveBank = s.bank; saveSlot = s.slot }
         else { saveBank = bank; saveSlot = 0 }
         savePickerPresented = true
@@ -421,20 +446,50 @@ final class AppModel: ObservableObject {
 
     func confirmSaveToDevice() {
         savePickerPresented = false
-        guard isConnected, let doc = document else {
+        guard isConnected else {
             message = "Connect an Electra One to save to the device."
             return
         }
+
+        // Decide what to push. With no preset open but a script in the editor,
+        // wrap the Lua in a minimal preset so it has a slot to live in — this is
+        // what lets a script-only session push and run on the device.
+        var doc: PresetDocument
+        let synthesized: Bool
+        if let d = document {
+            doc = d
+            synthesized = false
+        } else if !luaSource.isEmpty {
+            doc = .newPreset(name: "Lua Script")
+            synthesized = true
+        } else {
+            message = "Nothing to push — open a preset or write a script first."
+            return
+        }
+        // Make sure the current editor script rides along with the upload.
+        if !luaSource.isEmpty { doc.lua = luaSource }
+
         let json = doc.jsonString(pretty: false)
         let lua = doc.lua
         let b = saveBank, s = saveSlot
         let luaNote = (lua?.isEmpty == false) ? " + Lua" : ""
         run("Uploading \"\(doc.name)\"\(luaNote) → bank \(b), slot \(s)…") {
             try await self.device.putProject(json: json, lua: lua, bank: b, slot: s)
-            self.deviceSlot = (bank: b, slot: s)
-            self.dirty = false
-            if self.bank == b { self.rescan() }
-            return "Saved \"\(doc.name)\"\(luaNote) → bank \(b), slot \(s)."
+            // Auto-load: switch the controller to the slot we just wrote so it
+            // becomes the live preset (Set-slot only arms; Switch-slot loads).
+            try await self.device.activateSlot(bank: b, slot: s)
+            // Adopt the pushed preset as the open document (especially when we
+            // synthesized one) so subsequent edits/pushes target the same slot.
+            if synthesized || self.document == nil {
+                self.loadDocument(doc, fileURL: nil, deviceSlot: (b, s))
+            } else {
+                self.deviceSlot = (bank: b, slot: s)
+                self.dirty = false
+            }
+            self.bank = b
+            self.openSlot = s
+            self.rescan()
+            return "Pushed \"\(doc.name)\"\(luaNote) → bank \(b), slot \(s) and loaded it."
         }
     }
 

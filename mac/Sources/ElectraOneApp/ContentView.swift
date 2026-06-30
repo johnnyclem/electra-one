@@ -89,6 +89,7 @@ struct ContentView: View {
         }
         .toolbar { toolbarContent }
         .sheet(isPresented: $model.savePickerPresented) { SaveToDeviceSheet() }
+        .sheet(isPresented: $model.simulatorPresented) { SimulatorSheet() }
         .preferredColorScheme(.dark)
     }
 
@@ -127,7 +128,7 @@ struct ContentView: View {
                 Label("Push to Device", systemImage: "arrow.up.circle.fill")
             }
             .buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
-            .disabled(model.document == nil || !model.isConnected)
+            .disabled(!model.canPushToDevice)
         }
     }
 }
@@ -885,13 +886,13 @@ private struct ScriptEditor: View {
             Button { model.importLua() } label: { Label("Import…", systemImage: "square.and.arrow.down") }
             Button { model.exportLua() } label: { Label("Export…", systemImage: "square.and.arrow.up") }
             Button { model.presentSaveToDevice() } label: { Label("Push to Device", systemImage: "arrow.up.circle") }
-                .disabled(model.document == nil || !model.isConnected)
+                .disabled(!model.canPushToDevice)
             Spacer()
             if let doc = model.document {
                 Text("attached to “\(doc.name.isEmpty ? "preset" : doc.name)”")
                     .font(.caption).foregroundStyle(ElectraTheme.textTertiary)
             } else {
-                Text("scratch — open or create a preset to push to device")
+                Text("scratch script — Push to Device wraps it in a new preset")
                     .font(.caption).foregroundStyle(ElectraTheme.textTertiary)
             }
         }
@@ -1074,6 +1075,113 @@ private struct WelcomeView: View {
             }
         }
         .padding(50).frame(maxWidth: .infinity, maxHeight: .infinity).background(ElectraTheme.background)
+    }
+}
+
+// MARK: - Simulator (Run)
+
+/// The in-app simulator: renders the attached preset's screen, the status-bar
+/// text the script set via `info.setText`, and the console output from the run.
+/// The script executes against a mocked Electra environment (see LuaEngine), so
+/// this is a preview — true device behaviour comes from Push to Device.
+private struct SimulatorSheet: View {
+    @EnvironmentObject var model: AppModel
+    private let screenW = PresetDocument.screenWidth
+    private let screenH = PresetDocument.screenHeight
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            screen.background(Color.black)
+            Divider()
+            console
+        }
+        .frame(width: 760, height: 640)
+        .background(ElectraTheme.background)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Label("Simulator", systemImage: "play.rectangle.fill").font(.headline)
+            Text(model.document?.name.isEmpty == false ? model.document!.name : "Lua Script")
+                .foregroundStyle(ElectraTheme.textSecondary)
+            Spacer()
+            Button { model.luaRun() } label: { Label("Run Again", systemImage: "play.fill") }
+                .buttonStyle(.bordered)
+            Button("Done") { model.simulatorPresented = false }
+                .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
+        }
+        .padding(12)
+        .background(ElectraTheme.surface)
+    }
+
+    private var currentControls: [PresetDocument.Control] {
+        model.document?.controls(onPage: model.currentPageId) ?? []
+    }
+
+    private var screen: some View {
+        GeometryReader { geo in
+            let pad: CGFloat = 28
+            let scale = max(0.05, min((geo.size.width - pad) / screenW,
+                                      (geo.size.height - pad - 26) / screenH))
+            VStack(spacing: 6) {
+                ZStack(alignment: .topLeading) {
+                    Color.black
+                    ForEach(currentControls) { control in
+                        RichControl(control: control, scale: scale, selected: false, liveOffset: .zero,
+                                    onSelect: {}, onDragChanged: { _ in }, onDragEnded: { _ in })
+                    }
+                    if currentControls.isEmpty {
+                        Text(model.document == nil
+                             ? "Script-only run — no preset screen to render.\nUse Push to Device to run it on hardware."
+                             : "No controls on this page.")
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.white.opacity(0.4))
+                            .frame(width: screenW * scale, height: screenH * scale)
+                    }
+                }
+                .frame(width: screenW * scale, height: screenH * scale)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                // Bottom status bar — reflects info.setText() from the run.
+                Text(model.simBottomText.isEmpty
+                     ? (model.document?.name.isEmpty == false ? model.document!.name : "Electra One")
+                     : model.simBottomText)
+                    .font(.system(size: max(8, 10 * scale), weight: .medium, design: .monospaced))
+                    .foregroundStyle(model.simBottomText.isEmpty ? ElectraTheme.textTertiary : ElectraTheme.accent)
+                    .lineLimit(1)
+                    .frame(width: screenW * scale)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(pad / 2)
+        }
+    }
+
+    private var console: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("CONSOLE").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
+                Spacer()
+                Button { model.clearConsole() } label: { Label("Clear", systemImage: "trash") }
+                    .buttonStyle(.borderless).controlSize(.small)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(model.luaConsole.isEmpty ? "— output appears here —" : model.luaConsole)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(model.luaConsole.isEmpty ? ElectraTheme.textTertiary : .white.opacity(0.9))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .padding(10)
+                    Color.clear.frame(height: 1).id("bottom")
+                }
+                .onChange(of: model.luaConsole) { _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            }
+        }
+        .frame(height: 190)
+        .background(Color(red: 0.08, green: 0.08, blue: 0.09))
     }
 }
 
