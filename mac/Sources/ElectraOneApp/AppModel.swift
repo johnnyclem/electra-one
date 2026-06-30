@@ -561,6 +561,139 @@ final class AppModel: ObservableObject {
         message = "Added \(kind.displayName)."
     }
 
+    // ── Script buttons ─────────────────────────────────────────────────────────
+
+    /// Where a script button's Lua code comes from.
+    enum ScriptSource { case editor, clipboard, file }
+
+    /// Read Lua code for a new script button. Returns nil if the source is empty
+    /// or the user cancels a file picker.
+    func acquireScriptSource(_ source: ScriptSource) -> String? {
+        switch source {
+        case .editor:
+            let s = luaSource.trimmingCharacters(in: .whitespacesAndNewlines)
+            return s.isEmpty ? nil : luaSource
+        case .clipboard:
+            let s = NSPasteboard.general.string(forType: .string)
+            return (s?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? s : nil
+        case .file:
+            let panel = NSOpenPanel()
+            var types: [UTType] = []
+            if let lua = UTType(filenameExtension: "lua") { types.append(lua) }
+            types.append(.plainText)
+            panel.allowedContentTypes = types
+            panel.allowsOtherFileTypes = true
+            guard panel.runModal() == .OK, let url = panel.url else { return nil }
+            return try? String(contentsOf: url, encoding: .utf8)
+        }
+    }
+
+    /// Add a Script button: place a pad bound to a Lua function and append that
+    /// function (wrapping the supplied code) to the preset's Lua script.
+    func addScriptControl(from source: ScriptSource) {
+        guard document != nil else { return }
+        guard let body = acquireScriptSource(source) else {
+            message = "No script to add."
+            return
+        }
+        var newId: Int?
+        edit { doc in
+            let id = doc.addScriptControl(pageId: currentPageId)
+            newId = id
+            DispatchQueue.main.async { self.selectedControlId = id }
+        }
+        guard let id = newId else { return }
+        appendScriptFunction(name: PresetDocument.scriptFunctionName(forControlId: id), body: body)
+        message = "Added Script button."
+    }
+
+    /// Append a named function wrapping `body` to the preset's Lua source.
+    private func appendScriptFunction(name: String, body: String) {
+        let trimmed = body.trimmingCharacters(in: .newlines)
+        let fn = "\n\nfunction \(name)(valueObject, value)\n\(trimmed)\nend\n"
+        setLuaSource(luaSource.isEmpty ? String(fn.drop(while: { $0 == "\n" })) : luaSource + fn)
+    }
+
+    /// Run a script button's function in the in-app simulator, surfacing print
+    /// output in the console (and any `info.setText` in the simulator status bar).
+    func runScriptControl(id: Int) {
+        let fn = document?.control(id: id)?.functionName
+            ?? PresetDocument.scriptFunctionName(forControlId: id)
+        let name = document?.control(id: id)?.name ?? fn
+        if let err = lua.check(luaSource) {
+            appendConsole("▶ Run \(name) — build failed:\n\(err)")
+            simBottomText = ""
+            simulatorPresented = true
+            return
+        }
+        appendConsole("▶ Run \(name) …")
+        let combined = luaSource + "\n\n\(fn)(nil, 127)\n"
+        let result = lua.simulate(combined)
+        if !result.output.isEmpty { appendConsole(result.output, raw: true) }
+        if let err = result.error {
+            appendConsole("✗ \(err)")
+        } else {
+            appendConsole("✓ finished")
+        }
+        simBottomText = result.bottomText ?? ""
+        simulatorPresented = true
+    }
+
+    /// Jump to the Lua editor so the user can edit a script button's function.
+    func editScriptControl(id: Int) {
+        editorMode = .script
+    }
+
+    /// Replace a script button's code with a fresh source, rewriting its function.
+    func replaceScriptControl(id: Int, from source: ScriptSource) {
+        guard let body = acquireScriptSource(source) else {
+            message = "No script to import."
+            return
+        }
+        let name = document?.control(id: id)?.functionName
+            ?? PresetDocument.scriptFunctionName(forControlId: id)
+        // Drop any existing definition of this function, then append the new one.
+        setLuaSource(Self.removingFunction(named: name, from: luaSource))
+        appendScriptFunction(name: name, body: body)
+        message = "Replaced script."
+    }
+
+    /// Remove a `function <name>(...) ... end` block from Lua source (best-effort,
+    /// matched by depth-counting `function`/`end` keywords from the definition).
+    static func removingFunction(named name: String, from source: String) -> String {
+        let lines = source.components(separatedBy: "\n")
+        var out: [String] = []
+        var i = 0
+        let header = "function \(name)("
+        while i < lines.count {
+            if lines[i].trimmingCharacters(in: .whitespaces).hasPrefix(header) {
+                // Skip until the matching `end`. Count Lua block openers that pair
+                // with `end`: function/if/for/while, plus a bare `do` (the `do` in a
+                // for/while header belongs to the loop, so don't count it twice).
+                var depth = 0
+                while i < lines.count {
+                    let t = lines[i].trimmingCharacters(in: .whitespaces)
+                    let words = t.split(whereSeparator: { !($0.isLetter || $0.isNumber || $0 == "_") }).map(String.init)
+                    let isLoopHeader = words.contains("for") || words.contains("while")
+                    for w in words {
+                        switch w {
+                        case "function", "if", "for", "while": depth += 1
+                        case "do" where !isLoopHeader:         depth += 1
+                        case "end":                            depth -= 1
+                        default:                               break
+                        }
+                    }
+                    i += 1
+                    if depth <= 0 { break }
+                }
+                continue
+            }
+            out.append(lines[i])
+            i += 1
+        }
+        return out.joined(separator: "\n").trimmingCharacters(in: .newlines)
+    }
+
     func setControlKind(_ id: Int, _ kind: PresetDocument.ControlKind) {
         edit { $0.setControlKind(id: id, kind) }
     }

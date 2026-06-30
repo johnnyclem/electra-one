@@ -32,31 +32,69 @@ extension PresetDocument {
 
     // ── Project → preset conversion ─────────────────────────────────────────
 
+    /// The eproj editor places tiles on a 6-column grid. Each device *page*
+    /// occupies a block of 72 editor slots (12 editor rows), and every two
+    /// editor rows collapse into one device pot-row — so a 12-row editor page
+    /// maps onto the device's 6 rows (3 control sets × 2 rows of 6 pots).
+    private static let editorCols = 6
+    private static let editorSlotsPerPage = 72
+
+    /// Decode a 0-based eproj `slotId` into its device coordinates.
+    private static func decodeSlot(_ slot: Int)
+        -> (pageIndex: Int, deviceRow: Int, col: Int) {
+        let pageIndex = slot / editorSlotsPerPage
+        let local = slot % editorSlotsPerPage
+        let editorRow = local / editorCols
+        let col = local % editorCols
+        return (pageIndex, editorRow / 2, col)
+    }
+
     static func importProject(_ proj: [String: Any]) -> PresetDocument {
         let pagesIn = proj["pages"] as? [[String: Any]] ?? [["id": 1, "name": "Page 1"]]
         let pageIds = pagesIn.compactMap { $0["id"] as? Int }
-        func pageId(forSlot slot: Int) -> Int {
-            let idx = (slot - 1) / 36
-            return (idx >= 0 && idx < pageIds.count) ? pageIds[idx] : (pageIds.first ?? 1)
+        func pageId(forIndex idx: Int) -> Int {
+            (idx >= 0 && idx < pageIds.count) ? pageIds[idx] : (pageIds.first ?? 1)
         }
 
         let tiles = proj["tiles"] as? [[String: Any]] ?? []
         var controls: [[String: Any]] = []
+        var groups: [[String: Any]] = []
         for (i, tile) in tiles.enumerated() {
-            let slotId = tile["slotId"] as? Int ?? (i + 1)
-            let (col, row) = SlotGeometry.cell(forSlot: slotId)
+            let slotId = tile["slotId"] as? Int ?? i
+            let (pageIndex, deviceRow, col) = decodeSlot(slotId)
+            let pid = pageId(forIndex: pageIndex)
             let refId = tile["reference"] as? Int ?? (i + 1)
+            let type = tile["type"] as? String ?? "fader"
+            // A device cell on the collapsed 6×6 grid (1…36), reused for geometry.
+            let cellSlot = deviceRow * SlotGeometry.columns + col + 1
+            let cell = SlotGeometry.bounds(forSlot: cellSlot)
+
+            // `label` tiles are visual separators, not controls — the firmware
+            // only accepts fader/list/pad/vfader/adsr/adr/dx7envelope and NACKs
+            // any other control type. Emit them as `groups` instead.
+            if type == "label" {
+                let span = max(1, tile["span"] as? Int ?? 1)
+                let width = span * Int(SlotGeometry.slotWidth.rounded())
+                groups.append([
+                    "id": refId,
+                    "pageId": pid,
+                    "name": tile["name"] as? String ?? "",
+                    "color": tile["color"] as? String ?? "FFFFFF",
+                    "bounds": [cell.array[0], cell.array[1], width, 16],
+                ])
+                continue
+            }
 
             var control: [String: Any] = [
                 "id": refId,
-                "type": tile["type"] as? String ?? "fader",
+                "type": type,
                 "name": tile["name"] as? String ?? "",
                 "color": tile["color"] as? String ?? "FFFFFF",
-                "bounds": SlotGeometry.bounds(forSlot: slotId).array,
-                "pageId": pageId(forSlot: slotId),
-                "controlSetId": SlotGeometry.controlSet(forRow: row),
+                "bounds": cell.array,
+                "pageId": pid,
+                "controlSetId": SlotGeometry.controlSet(forRow: deviceRow),
                 "visible": tile["visible"] as? Bool ?? true,
-                "inputs": [["potId": SlotGeometry.pot(col: col, row: row), "valueId": "value"]],
+                "inputs": [["potId": SlotGeometry.pot(col: col, row: deviceRow), "valueId": "value"]],
             ]
             if let v = tile["variant"] as? String, !v.isEmpty { control["variant"] = v }
             if let m = tile["mode"] as? String { control["mode"] = m }
@@ -86,7 +124,7 @@ extension PresetDocument {
             "projectId": proj["id"] as? String ?? PresetDocument.newPreset().projectId ?? "imported",
             "pages": pagesIn.map { ["id": $0["id"] ?? 1, "name": $0["name"] ?? "Page"] },
             "devices": devices,
-            "groups": [[String: Any]](),
+            "groups": groups,
             "overlays": [[String: Any]](),
             "controls": controls,
         ]

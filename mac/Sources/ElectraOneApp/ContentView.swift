@@ -117,6 +117,12 @@ struct ContentView: View {
                 ForEach(PresetDocument.ControlKind.allCases, id: \.self) { kind in
                     Button(kind.displayName) { model.addControl(kind: kind) }
                 }
+                Divider()
+                Menu("Script") {
+                    Button("From Lua Editor")      { model.addScriptControl(from: .editor) }
+                    Button("Paste from Clipboard") { model.addScriptControl(from: .clipboard) }
+                    Button("Import File…")         { model.addScriptControl(from: .file) }
+                }
             } label: {
                 Label("Add", systemImage: "plus")
             }
@@ -377,6 +383,7 @@ private struct DeviceCanvas: View {
                     selected: multiSelection.contains(control.id),
                     liveOffset: dragIDs.contains(control.id) ? dragOffset : .zero,
                     onSelect: { select(control.id) },
+                    onRun: { model.runScriptControl(id: control.id) },
                     onDragChanged: { t in
                         if dragIDs.isEmpty { dragIDs = group(for: control.id) }
                         dragOffset = t
@@ -483,6 +490,7 @@ private struct RichControl: View {
     let selected: Bool
     let liveOffset: CGSize          // applied to the whole selection during a group drag
     let onSelect: () -> Void
+    var onRun: () -> Void = {}
     let onDragChanged: (CGSize) -> Void
     let onDragEnded: (CGSize) -> Void
 
@@ -495,7 +503,9 @@ private struct RichControl: View {
             .frame(width: w, height: h)
             .position(x: (control.x + control.w / 2) * scale + liveOffset.width,
                       y: (control.y + control.h / 2) * scale + liveOffset.height)
-            // Tap + drag coexist cleanly via simultaneousGesture.
+            // Double-click runs a script button; single tap selects. Tap + drag
+            // coexist cleanly via simultaneousGesture.
+            .simultaneousGesture(TapGesture(count: 2).onEnded { if control.isScript { onRun() } })
             .simultaneousGesture(TapGesture().onEnded { onSelect() })
             .simultaneousGesture(
                 DragGesture(minimumDistance: 4)
@@ -521,14 +531,32 @@ private struct RichControl: View {
         }
         .overlay(RoundedRectangle(cornerRadius: ElectraTheme.controlCornerRadius)
             .stroke(selected ? Color.white : .clear, lineWidth: 2))
+        .overlay(alignment: .topTrailing) { if control.isScript { runBadge } }
+    }
+
+    /// A ▶ badge on script buttons; clicking it runs the script (without selecting).
+    private var runBadge: some View {
+        Image(systemName: "play.circle.fill")
+            .font(.system(size: max(10, 12 * scale * 1.4)))
+            .foregroundStyle(.white, color)
+            .padding(2)
+            .contentShape(Circle())
+            .onTapGesture { onRun() }
+            .help("Run script")
     }
 
     @ViewBuilder private var graphic: some View {
-        switch control.kind {
-        case .pad:
-            RoundedRectangle(cornerRadius: 3).fill(color.opacity(0.35))
-                .overlay(RoundedRectangle(cornerRadius: 3).stroke(color, lineWidth: 1))
-                .frame(maxWidth: .infinity).frame(height: max(8, h * 0.4))
+        if control.isScript {
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .font(.system(size: max(10, 14 * scale * 1.4), weight: .semibold))
+                .foregroundStyle(color)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            switch control.kind {
+            case .pad:
+                RoundedRectangle(cornerRadius: 3).fill(color.opacity(0.35))
+                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(color, lineWidth: 1))
+                    .frame(maxWidth: .infinity).frame(height: max(8, h * 0.4))
         case .list:
             RoundedRectangle(cornerRadius: 2).stroke(color.opacity(0.7))
                 .overlay(Text("▾").font(.system(size: max(7, 9 * scale * 1.4))).foregroundStyle(color))
@@ -562,6 +590,7 @@ private struct RichControl: View {
                 .frame(height: max(4, 6 * scale * 1.4))
                 Text(valueLabel).font(.system(size: max(6, 8 * scale * 1.4), design: .monospaced))
                     .foregroundStyle(.white.opacity(0.6))
+            }
             }
         }
     }
@@ -758,6 +787,25 @@ private struct Inspector: View {
                 }
             }
         }
+        if c.isScript {
+            Divider()
+            Text("SCRIPT").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
+            Text("Runs `\(c.functionName ?? "")` in the preset's Lua. Tap ▶, double-click the control, or Run below.")
+                .font(.caption).foregroundStyle(ElectraTheme.textTertiary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button { model.runScriptControl(id: c.id) } label: { Label("Run", systemImage: "play.fill") }
+                    .buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
+                Button { model.editScriptControl(id: c.id) } label: { Label("Edit Script…", systemImage: "curlybraces") }
+            }
+            Menu {
+                Button("From Lua Editor")      { model.replaceScriptControl(id: c.id, from: .editor) }
+                Button("Paste from Clipboard") { model.replaceScriptControl(id: c.id, from: .clipboard) }
+                Button("Import File…")         { model.replaceScriptControl(id: c.id, from: .file) }
+            } label: {
+                Label("Replace…", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .menuStyle(.borderlessButton)
+        } else {
         Divider()
         Text("MIDI").font(.subheadline.bold())
         if c.kind == .adsr {
@@ -779,6 +827,7 @@ private struct Inspector: View {
                 TextField("", value: Binding(get: { c.parameterNumber ?? 0 }, set: { model.setControlParameterNumber(c.id, $0) }), format: .number)
                     .textFieldStyle(.roundedBorder)
             }
+        }
         }
         Divider()
         Text("POSITION").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)

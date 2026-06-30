@@ -131,8 +131,14 @@ public struct PresetDocument {
         public var maxValue: Int?
         public var valueCount: Int
         public var visible: Bool
+        /// Name of the Lua function this control's value invokes, if any. Script
+        /// buttons are plain `pad`s distinguished only by carrying this binding.
+        public var functionName: String?
 
         public var kind: ControlKind { ControlKind.from(type: type, variant: variant) }
+
+        /// A control bound to a Lua function (a "Script button").
+        public var isScript: Bool { functionName?.isEmpty == false }
     }
 
     private static func parseControl(_ c: [String: Any]) -> Control? {
@@ -158,7 +164,8 @@ public struct PresetDocument {
             minValue: firstMsg?["min"] as? Int,
             maxValue: firstMsg?["max"] as? Int,
             valueCount: values.count,
-            visible: c["visible"] as? Bool ?? true
+            visible: c["visible"] as? Bool ?? true,
+            functionName: values.first?["function"] as? String
         )
     }
 
@@ -358,6 +365,50 @@ public struct PresetDocument {
                 "message": ["type": "cc7", "min": 0, "max": 127, "parameterNumber": newId, "deviceId": dev],
             ]]
         }
+
+        controls.append(control)
+        root["controls"] = controls
+        return newId
+    }
+
+    /// The conventional Lua function name for a script button with the given id.
+    public static func scriptFunctionName(forControlId id: Int) -> String {
+        "scriptBtn_\(id)"
+    }
+
+    /// Add a "Script button": a `pad` whose value invokes a Lua function. Placed
+    /// in the next free grid cell like `addControl`. The referenced function is
+    /// expected to live in the preset's Lua script. Returns the new control's id.
+    @discardableResult
+    public mutating func addScriptControl(pageId: Int, deviceId: Int? = nil) -> Int {
+        var controls = root["controls"] as? [[String: Any]] ?? []
+        let newId = (controls.compactMap { $0["id"] as? Int }.max() ?? 0) + 1
+        let dev = deviceId ?? (root["devices"] as? [[String: Any]])?.first?["id"] as? Int ?? 1
+
+        let used = controls.filter { ($0["pageId"] as? Int) == pageId }.count
+        let slot = (used % SlotGeometry.slotsPerPage) + 1
+        let (col, row) = SlotGeometry.cell(forSlot: slot)
+        let b = SlotGeometry.bounds(forSlot: slot)
+        let pot = SlotGeometry.pot(col: col, row: row)
+
+        let control: [String: Any] = [
+            "id": newId,
+            "type": "pad",
+            "mode": "momentary",
+            "visible": true,
+            "name": "Script",
+            "color": Self.palette[1 + (newId % (Self.palette.count - 1))],
+            "pageId": pageId,
+            "controlSetId": SlotGeometry.controlSet(forRow: row),
+            "bounds": b.array,
+            "inputs": [["potId": pot, "valueId": "value"]],
+            "values": [[
+                "id": "value",
+                "function": Self.scriptFunctionName(forControlId: newId),
+                "message": ["type": "cc7", "onValue": 127, "offValue": 0,
+                            "parameterNumber": newId, "deviceId": dev],
+            ]],
+        ]
 
         controls.append(control)
         root["controls"] = controls
