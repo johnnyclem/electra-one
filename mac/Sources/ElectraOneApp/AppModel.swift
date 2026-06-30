@@ -52,6 +52,9 @@ final class AppModel: ObservableObject {
     @Published var aiBarPresented = false
     @Published var aiSettingsPresented = false
     @Published var apiKeyPresent = Keychain.hasKey
+    @Published var aiBaseURL: String = UserDefaults.standard.string(forKey: "aiBaseURL") ?? AIClient.defaultBaseURL {
+        didSet { UserDefaults.standard.set(aiBaseURL, forKey: "aiBaseURL") }
+    }
     @Published var aiModel: String = UserDefaults.standard.string(forKey: "aiModel") ?? AIClient.defaultModel {
         didSet { UserDefaults.standard.set(aiModel, forKey: "aiModel") }
     }
@@ -307,20 +310,18 @@ final class AppModel: ObservableObject {
     func generateScript() {
         let prompt = aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return }
-        guard let key = Keychain.apiKey() else {
-            aiSettingsPresented = true
-            message = "Add your Anthropic API key to use AI generation."
-            return
-        }
+        // API key is optional — local servers (Ollama, LM Studio) don't need one.
+        let key = Keychain.apiKey()
+        let base = aiBaseURL
         let model = aiModel
         let ctx = presetControlContext
         aiBusy = true
         luaSource = "" // clear; tokens stream in live
-        appendConsole("✨ Streaming with \(model): \(prompt)")
+        appendConsole("✨ Streaming with \(model) @ \(base): \(prompt)")
         Task {
             do {
                 let lua = try await AIClient.streamLua(
-                    request: prompt, presetContext: ctx, model: model, apiKey: key,
+                    request: prompt, presetContext: ctx, baseURL: base, model: model, apiKey: key,
                     onText: { soFar in await MainActor.run { self.luaSource = soFar } })
                 // Commit the final (fence-stripped) source to the document + undo/dirty.
                 setLuaSource(lua)

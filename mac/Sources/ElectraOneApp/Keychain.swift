@@ -1,11 +1,12 @@
 import Foundation
 import Security
 
-/// Minimal Keychain wrapper for the Anthropic API key. The key is entered by
-/// the user in Settings and stored securely; the app never ships a key.
+/// Minimal Keychain wrapper for the AI endpoint's API key. The key is optional
+/// (local servers like Ollama need none), entered by the user in Settings and
+/// stored securely; the app never ships a key.
 enum Keychain {
     private static let service = "one.electra.companion"
-    private static let account = "anthropic-api-key"
+    private static let account = "ai-api-key"
 
     static func setAPIKey(_ key: String) {
         let data = Data(key.utf8)

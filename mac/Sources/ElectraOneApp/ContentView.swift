@@ -936,13 +936,29 @@ private struct AISettingsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("AI Settings").font(.headline)
-            Text("Generation uses the Anthropic Messages API. Your API key is stored in the macOS Keychain and sent only to api.anthropic.com.")
+            Text("Generation uses any OpenAI-compatible chat-completions endpoint — a local Ollama / LM Studio server, OpenAI, OpenRouter, etc. The endpoint and model are stored as preferences; the API key (optional for local servers) is kept in the macOS Keychain.")
                 .font(.callout).foregroundStyle(ElectraTheme.textSecondary).fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Anthropic API key").font(.caption).foregroundStyle(ElectraTheme.textSecondary)
+                Text("Endpoint").font(.caption).foregroundStyle(ElectraTheme.textSecondary)
+                TextField(AIClient.defaultBaseURL, text: $model.aiBaseURL)
+                    .textFieldStyle(.roundedBorder)
+                Text("Base URL; “/v1/chat/completions” is appended automatically. Ollama default: \(AIClient.defaultBaseURL)")
+                    .font(.caption2).foregroundStyle(ElectraTheme.textTertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Model").font(.caption).foregroundStyle(ElectraTheme.textSecondary)
+                TextField(AIClient.defaultModel, text: $model.aiModel)
+                    .textFieldStyle(.roundedBorder)
+                Text("Any model the endpoint serves, e.g. llama3.1, qwen2.5-coder, gpt-4o-mini.")
+                    .font(.caption2).foregroundStyle(ElectraTheme.textTertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("API key (optional)").font(.caption).foregroundStyle(ElectraTheme.textSecondary)
                 HStack {
-                    SecureField(model.apiKeyPresent ? "•••••••••• (stored)" : "sk-ant-…", text: $keyField)
+                    SecureField(model.apiKeyPresent ? "•••••••••• (stored)" : "leave blank for local servers", text: $keyField)
                         .textFieldStyle(.roundedBorder)
                     Button("Save") { model.saveAPIKey(keyField); keyField = "" }
                         .disabled(keyField.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -950,15 +966,6 @@ private struct AISettingsSheet: View {
                         Button("Remove", role: .destructive) { model.clearAPIKey() }
                     }
                 }
-                Link("Get an API key at console.anthropic.com", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
-                    .font(.caption)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Model").font(.caption).foregroundStyle(ElectraTheme.textSecondary)
-                Picker("", selection: $model.aiModel) {
-                    ForEach(AIClient.models, id: \.self) { Text($0).tag($0) }
-                }.labelsHidden().pickerStyle(.segmented)
             }
 
             HStack {

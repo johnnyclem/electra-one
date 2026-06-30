@@ -1,20 +1,22 @@
 import Foundation
 
-/// Generates Electra One Lua scripts via the Anthropic Messages API (raw HTTP —
-/// no official Swift SDK). Defaults to Claude Opus 4.8.
+/// Generates Electra One Lua scripts via any OpenAI-compatible chat-completions
+/// endpoint (raw HTTP — no SDK). Works with a local Ollama server, OpenAI,
+/// LM Studio, vLLM, OpenRouter, etc. Defaults to Ollama at 127.0.0.1:11434.
 enum AIClient {
-    static let defaultModel = "claude-opus-4-8"
-    static let models = ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"]
+    /// Local Ollama (OpenAI-compatible) server. The API key is ignored by Ollama.
+    static let defaultBaseURL = "http://127.0.0.1:11434"
+    static let defaultModel = "llama3.1"
 
     enum AIError: Error, CustomStringConvertible {
-        case noKey
+        case badURL
         case http(Int, String)
         case network(String)
         case empty
 
         var description: String {
             switch self {
-            case .noKey: return "No API key. Add your Anthropic API key in AI Settings."
+            case .badURL: return "Invalid endpoint URL. Check the endpoint in AI Settings."
             case .http(let code, let msg): return "API error \(code): \(msg)"
             case .network(let m): return "Network error: \(m)"
             case .empty: return "The model returned no script."
@@ -51,17 +53,33 @@ enum AIClient {
     Write idiomatic, working scripts. Prefer onReady() for initialization. Keep comments concise.
     """
 
+    /// Build the chat-completions URL from a user-supplied base. Accepts bare
+    /// hosts ("http://127.0.0.1:11434"), "/v1" roots, or a full endpoint.
+    static func completionsURL(base: String) -> URL? {
+        var b = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        if b.isEmpty { b = defaultBaseURL }
+        while b.hasSuffix("/") { b.removeLast() }
+        let path: String
+        if b.hasSuffix("/chat/completions") {
+            path = ""
+        } else if b.hasSuffix("/v1") {
+            path = "/chat/completions"
+        } else {
+            path = "/v1/chat/completions"
+        }
+        return URL(string: b + path)
+    }
+
     /// Stream a generation. `onText` is called with the cumulative text so far
     /// (latest-wins, ordered) for live display. Returns the final, fence-stripped
     /// Lua source.
     static func streamLua(request: String,
                           presetContext: String?,
+                          baseURL: String,
                           model: String,
-                          apiKey: String,
+                          apiKey: String?,
                           onText: @escaping (String) async -> Void) async throws -> String {
-        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
-            throw AIError.network("bad URL")
-        }
+        guard let url = completionsURL(base: baseURL) else { throw AIError.badURL }
         var userText = request
         if let ctx = presetContext, !ctx.isEmpty {
             userText += "\n\nThe current preset's controls (id — name [type]):\n\(ctx)"
@@ -71,16 +89,20 @@ enum AIClient {
             "model": model,
             "max_tokens": 8000,
             "stream": true,
-            "system": systemPrompt,
-            "messages": [["role": "user", "content": userText]],
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": userText],
+            ],
         ]
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 120
-        req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // OpenAI-style bearer auth. Ollama ignores it; OpenAI/OpenRouter require it.
+        if let key = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (bytes, response): (URLSession.AsyncBytes, URLResponse)
@@ -105,26 +127,23 @@ enum AIClient {
         for try await line in bytes.lines {
             guard line.hasPrefix("data:") else { continue } // skip "event:" / blank lines
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            if payload == "[DONE]" { break }
             guard let d = payload.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
-                  let type = obj["type"] as? String else { continue }
-            switch type {
-            case "content_block_delta":
-                if let delta = obj["delta"] as? [String: Any],
-                   (delta["type"] as? String) == "text_delta",
-                   let t = delta["text"] as? String {
-                    full += t
-                    // Coalesce UI pushes to roughly every ~24 chars to keep highlighting smooth.
-                    if full.count - lastPushed >= 24 {
-                        lastPushed = full.count
-                        await onText(full)
-                    }
+                  let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any]
+            else { continue }
+            // OpenAI chat-completions streaming: choices[0].delta.content
+            if let choices = obj["choices"] as? [[String: Any]],
+               let delta = choices.first?["delta"] as? [String: Any],
+               let t = delta["content"] as? String, !t.isEmpty {
+                full += t
+                // Coalesce UI pushes to roughly every ~24 chars to keep highlighting smooth.
+                if full.count - lastPushed >= 24 {
+                    lastPushed = full.count
+                    await onText(full)
                 }
-            case "error":
-                let msg = (obj["error"] as? [String: Any])?["message"] as? String ?? "stream error"
+            } else if let err = obj["error"] as? [String: Any] {
+                let msg = err["message"] as? String ?? "stream error"
                 throw AIError.http(http.statusCode, msg)
-            default:
-                break
             }
         }
         await onText(full) // final flush
