@@ -932,6 +932,32 @@ private struct ScriptEditor: View {
 private struct AISettingsSheet: View {
     @EnvironmentObject var model: AppModel
     @State private var keyField: String = ""
+    @State private var availableModels: [String] = []
+    @State private var loadingModels = false
+    @State private var modelsError: String?
+
+    private func loadModels() {
+        loadingModels = true
+        modelsError = nil
+        let base = model.aiBaseURL
+        let key = Keychain.apiKey()
+        Task {
+            do {
+                let ids = try await AIClient.listModels(baseURL: base, apiKey: key)
+                await MainActor.run {
+                    availableModels = ids
+                    loadingModels = false
+                    if ids.isEmpty { modelsError = "No models reported by the endpoint." }
+                    else if !ids.contains(model.aiModel), let first = ids.first { model.aiModel = first }
+                }
+            } catch {
+                await MainActor.run {
+                    loadingModels = false
+                    modelsError = "\(error)"
+                }
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -948,11 +974,31 @@ private struct AISettingsSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Model").font(.caption).foregroundStyle(ElectraTheme.textSecondary)
-                TextField(AIClient.defaultModel, text: $model.aiModel)
-                    .textFieldStyle(.roundedBorder)
-                Text("Any model the endpoint serves, e.g. llama3.1, qwen2.5-coder, gpt-4o-mini.")
-                    .font(.caption2).foregroundStyle(ElectraTheme.textTertiary)
+                HStack {
+                    Text("Model").font(.caption).foregroundStyle(ElectraTheme.textSecondary)
+                    Spacer()
+                    Button { loadModels() } label: {
+                        if loadingModels { Text("Loading…") }
+                        else { Label("Refresh", systemImage: "arrow.clockwise") }
+                    }
+                    .buttonStyle(.borderless).controlSize(.small).disabled(loadingModels)
+                }
+                HStack {
+                    if !availableModels.isEmpty {
+                        Picker("", selection: $model.aiModel) {
+                            ForEach(availableModels, id: \.self) { Text($0).tag($0) }
+                        }
+                        .labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    TextField(AIClient.defaultModel, text: $model.aiModel)
+                        .textFieldStyle(.roundedBorder)
+                }
+                if let err = modelsError {
+                    Text(err).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+                } else {
+                    Text("Pick a model the endpoint serves, or type one (e.g. llama3.1, gemma3, ornith:latest).")
+                        .font(.caption2).foregroundStyle(ElectraTheme.textTertiary)
+                }
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -974,6 +1020,7 @@ private struct AISettingsSheet: View {
             }
         }
         .padding(20).frame(width: 460)
+        .onAppear { loadModels() }
     }
 }
 

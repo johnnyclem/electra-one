@@ -70,6 +70,45 @@ enum AIClient {
         return URL(string: b + path)
     }
 
+    /// Build the models-list URL ("/v1/models") from a user-supplied base.
+    static func modelsURL(base: String) -> URL? {
+        var b = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        if b.isEmpty { b = defaultBaseURL }
+        while b.hasSuffix("/") { b.removeLast() }
+        if let r = b.range(of: "/chat/completions", options: .backwards) {
+            b = String(b[..<r.lowerBound])
+        }
+        let path = b.hasSuffix("/v1") ? "/models" : "/v1/models"
+        return URL(string: b + path)
+    }
+
+    /// Fetch the model ids the endpoint serves via the OpenAI-compatible
+    /// "/v1/models" route (Ollama, LM Studio, OpenAI, etc. all support it).
+    /// Returns the ids sorted; throws on network/HTTP failure.
+    static func listModels(baseURL: String, apiKey: String?) async throws -> [String] {
+        guard let url = modelsURL(base: baseURL) else { throw AIError.badURL }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 15
+        if let key = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: req)
+        } catch {
+            throw AIError.network(error.localizedDescription)
+        }
+        guard let http = response as? HTTPURLResponse else { throw AIError.network("no response") }
+        guard (200..<300).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? "unknown"
+            throw AIError.http(http.statusCode, msg)
+        }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = obj["data"] as? [[String: Any]] else { return [] }
+        let ids = arr.compactMap { $0["id"] as? String }
+        return ids.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
     /// Stream a generation. `onText` is called with the cumulative text so far
     /// (latest-wins, ordered) for live display. Returns the final, fence-stripped
     /// Lua source.
