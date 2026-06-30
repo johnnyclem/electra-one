@@ -895,7 +895,7 @@ private struct ScriptEditor: View {
                     .font(.caption).foregroundStyle(ElectraTheme.textTertiary)
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .padding(.horizontal, 14).padding(.top, 16).padding(.bottom, 8)
         .background(ElectraTheme.surface)
     }
 
