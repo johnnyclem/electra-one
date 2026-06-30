@@ -318,11 +318,22 @@ final class AppModel: ObservableObject {
         aiBusy = true
         luaSource = "" // clear; tokens stream in live
         appendConsole("✨ Streaming with \(model) @ \(base): \(prompt)")
+        var reasonedShown = false
         Task {
             do {
                 let lua = try await AIClient.streamLua(
                     request: prompt, presetContext: ctx, baseURL: base, model: model, apiKey: key,
-                    onText: { soFar in await MainActor.run { self.luaSource = soFar } })
+                    onText: { soFar in await MainActor.run { self.luaSource = soFar } },
+                    onReasoning: { _ in
+                        // Reasoning models (ornith, deepseek-r1, qwen3…) think before
+                        // answering — surface a one-time note so it doesn't look frozen.
+                        await MainActor.run {
+                            if !reasonedShown {
+                                reasonedShown = true
+                                self.appendConsole("🧠 Model is reasoning… (the script streams in once it finishes thinking)")
+                            }
+                        }
+                    })
                 // Commit the final (fence-stripped) source to the document + undo/dirty.
                 setLuaSource(lua)
                 appendConsole("✓ Script generated (\(lua.split(separator: "\n").count) lines). Review, Build, and Run.")

@@ -13,6 +13,7 @@ enum AIClient {
         case http(Int, String)
         case network(String)
         case empty
+        case onlyReasoning
 
         var description: String {
             switch self {
@@ -20,6 +21,7 @@ enum AIClient {
             case .http(let code, let msg): return "API error \(code): \(msg)"
             case .network(let m): return "Network error: \(m)"
             case .empty: return "The model returned no script."
+            case .onlyReasoning: return "The model spent its whole budget \"thinking\" and never produced a script. Try a non-reasoning model, raise the token limit, or add /no_think to the prompt."
             }
         }
     }
@@ -109,15 +111,18 @@ enum AIClient {
         return ids.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    /// Stream a generation. `onText` is called with the cumulative text so far
-    /// (latest-wins, ordered) for live display. Returns the final, fence-stripped
-    /// Lua source.
+    /// Stream a generation. `onText` is called with the cumulative answer text so
+    /// far (latest-wins, ordered) for live display. `onReasoning` is called with
+    /// incremental "thinking" tokens emitted by reasoning models (ornith,
+    /// deepseek-r1, qwen3, …) — these are shown as progress but are NOT part of
+    /// the returned script. Returns the final, fence-stripped Lua source.
     static func streamLua(request: String,
                           presetContext: String?,
                           baseURL: String,
                           model: String,
                           apiKey: String?,
-                          onText: @escaping (String) async -> Void) async throws -> String {
+                          onText: @escaping (String) async -> Void,
+                          onReasoning: ((String) async -> Void)? = nil) async throws -> String {
         guard let url = completionsURL(base: baseURL) else { throw AIError.badURL }
         var userText = request
         if let ctx = presetContext, !ctx.isEmpty {
@@ -161,8 +166,10 @@ enum AIClient {
             throw AIError.http(http.statusCode, msg)
         }
 
-        var full = ""
+        var full = ""              // answer tokens (delta.content) — becomes the Lua
+        var reasoning = ""         // thinking tokens (delta.reasoning) — progress only
         var lastPushed = 0
+        var lastReasonPushed = 0
         for try await line in bytes.lines {
             guard line.hasPrefix("data:") else { continue } // skip "event:" / blank lines
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
@@ -170,25 +177,53 @@ enum AIClient {
             guard let d = payload.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any]
             else { continue }
-            // OpenAI chat-completions streaming: choices[0].delta.content
+            // OpenAI chat-completions streaming: choices[0].delta.{content,reasoning}
             if let choices = obj["choices"] as? [[String: Any]],
-               let delta = choices.first?["delta"] as? [String: Any],
-               let t = delta["content"] as? String, !t.isEmpty {
-                full += t
-                // Coalesce UI pushes to roughly every ~24 chars to keep highlighting smooth.
-                if full.count - lastPushed >= 24 {
-                    lastPushed = full.count
-                    await onText(full)
+               let delta = choices.first?["delta"] as? [String: Any] {
+                // Reasoning models stream thinking in `reasoning` (Ollama) /
+                // `reasoning_content` (vLLM, DeepSeek) while `content` stays empty.
+                if let r = (delta["reasoning"] as? String) ?? (delta["reasoning_content"] as? String), !r.isEmpty {
+                    reasoning += r
+                    if reasoning.count - lastReasonPushed >= 40 {
+                        lastReasonPushed = reasoning.count
+                        if let onReasoning { await onReasoning(reasoning) }
+                    }
+                }
+                if let t = delta["content"] as? String, !t.isEmpty {
+                    full += t
+                    // Coalesce UI pushes to roughly every ~24 chars to keep highlighting smooth.
+                    if full.count - lastPushed >= 24 {
+                        lastPushed = full.count
+                        await onText(full)
+                    }
                 }
             } else if let err = obj["error"] as? [String: Any] {
                 let msg = err["message"] as? String ?? "stream error"
                 throw AIError.http(http.statusCode, msg)
             }
         }
+        if let onReasoning, !reasoning.isEmpty { await onReasoning(reasoning) } // final flush
+        // Some models keep reasoning inside the answer via <think>…</think> tags.
+        full = stripThink(full)
         await onText(full) // final flush
         let lua = stripFences(full).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !lua.isEmpty else { throw AIError.empty }
+        guard !lua.isEmpty else {
+            // Reasoning models can exhaust max_tokens before emitting any answer.
+            if !reasoning.isEmpty { throw AIError.onlyReasoning }
+            throw AIError.empty
+        }
         return lua
+    }
+
+    /// Strip a leading `<think>…</think>` block (some reasoning models embed it
+    /// in the answer rather than a separate field). Tolerates a missing close.
+    private static func stripThink(_ s: String) -> String {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.lowercased().hasPrefix("<think>") else { return s }
+        if let close = t.range(of: "</think>", options: [.caseInsensitive]) {
+            return String(t[close.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return "" // unterminated think block — no real answer
     }
 
     /// Example prompts surfaced in the AI bar.
