@@ -858,6 +858,10 @@ private struct ScriptEditor: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
+            if model.aiBarPresented {
+                aiBar
+                Divider()
+            }
             VSplitView {
                 LuaCodeView(text: Binding(get: { model.luaSource }, set: { model.setLuaSource($0) }))
                     .frame(minHeight: 180)
@@ -866,6 +870,7 @@ private struct ScriptEditor: View {
             }
         }
         .background(ElectraTheme.background)
+        .sheet(isPresented: $model.aiSettingsPresented) { AISettingsSheet() }
     }
 
     private var toolbar: some View {
@@ -873,6 +878,9 @@ private struct ScriptEditor: View {
             Button { model.luaBuild() } label: { Label("Build", systemImage: "hammer") }
             Button { model.luaRun() } label: { Label("Run", systemImage: "play.fill") }
                 .buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
+            Divider().frame(height: 16)
+            Button { model.aiBarPresented.toggle() } label: { Label("AI", systemImage: "sparkles") }
+                .tint(.purple)
             Divider().frame(height: 16)
             Button { model.importLua() } label: { Label("Import…", systemImage: "square.and.arrow.down") }
             Button { model.exportLua() } label: { Label("Export…", systemImage: "square.and.arrow.up") }
@@ -889,6 +897,69 @@ private struct ScriptEditor: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(ElectraTheme.surface)
+    }
+
+    private var aiBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles").foregroundStyle(.purple)
+            TextField("Describe the script you want (e.g. “make control 13 a 5-item algorithm list that recolors the params”)",
+                      text: $model.aiPrompt)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { model.generateScript() }
+                .disabled(model.aiBusy)
+            if model.aiBusy {
+                ProgressView().controlSize(.small)
+            } else {
+                Button { model.generateScript() } label: { Label("Generate", systemImage: "wand.and.stars") }
+                    .buttonStyle(.borderedProminent).tint(.purple)
+                    .disabled(model.aiPrompt.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            Button { model.aiSettingsPresented = true } label: { Image(systemName: "gearshape") }
+                .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(Color.purple.opacity(0.08))
+    }
+}
+
+private struct AISettingsSheet: View {
+    @EnvironmentObject var model: AppModel
+    @State private var keyField: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("AI Settings").font(.headline)
+            Text("Generation uses the Anthropic Messages API. Your API key is stored in the macOS Keychain and sent only to api.anthropic.com.")
+                .font(.callout).foregroundStyle(ElectraTheme.textSecondary).fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Anthropic API key").font(.caption).foregroundStyle(ElectraTheme.textSecondary)
+                HStack {
+                    SecureField(model.apiKeyPresent ? "•••••••••• (stored)" : "sk-ant-…", text: $keyField)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Save") { model.saveAPIKey(keyField); keyField = "" }
+                        .disabled(keyField.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if model.apiKeyPresent {
+                        Button("Remove", role: .destructive) { model.clearAPIKey() }
+                    }
+                }
+                Link("Get an API key at console.anthropic.com", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
+                    .font(.caption)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Model").font(.caption).foregroundStyle(ElectraTheme.textSecondary)
+                Picker("", selection: $model.aiModel) {
+                    ForEach(AIClient.models, id: \.self) { Text($0).tag($0) }
+                }.labelsHidden().pickerStyle(.segmented)
+            }
+
+            HStack {
+                Spacer()
+                Button("Done") { model.aiSettingsPresented = false }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20).frame(width: 460)
     }
 }
 

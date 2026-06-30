@@ -46,6 +46,16 @@ final class AppModel: ObservableObject {
     @Published var luaConsole: String = ""
     private let lua = LuaEngine()
 
+    // AI script generation
+    @Published var aiPrompt: String = ""
+    @Published var aiBusy = false
+    @Published var aiBarPresented = false
+    @Published var aiSettingsPresented = false
+    @Published var apiKeyPresent = Keychain.hasKey
+    @Published var aiModel: String = UserDefaults.standard.string(forKey: "aiModel") ?? AIClient.defaultModel {
+        didSet { UserDefaults.standard.set(aiModel, forKey: "aiModel") }
+    }
+
     static let sampleScript = """
     -- Electra One Lua. Build to syntax-check, Run to preview here.
     -- Device APIs (controls, midi, parameterMap, timer, …) are mocked offline.
@@ -269,6 +279,56 @@ final class AppModel: ObservableObject {
     private func appendConsole(_ text: String, raw: Bool = false) {
         if !luaConsole.isEmpty { luaConsole += "\n" }
         luaConsole += raw ? text : text
+    }
+
+    // ── AI generation ────────────────────────────────────────────────────────
+
+    func saveAPIKey(_ key: String) {
+        Keychain.setAPIKey(key.trimmingCharacters(in: .whitespacesAndNewlines))
+        apiKeyPresent = Keychain.hasKey
+    }
+
+    func clearAPIKey() {
+        Keychain.clear()
+        apiKeyPresent = false
+    }
+
+    /// Compact list of the open preset's controls, so generated scripts can
+    /// reference real control ids.
+    private var presetControlContext: String? {
+        guard let doc = document else { return nil }
+        let lines = doc.allControls().prefix(48).map { c -> String in
+            let name = c.name.isEmpty ? "(unnamed)" : c.name
+            return "  \(c.id) — \(name) [\(c.kind.displayName)]"
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
+    func generateScript() {
+        let prompt = aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return }
+        guard let key = Keychain.apiKey() else {
+            aiSettingsPresented = true
+            message = "Add your Anthropic API key to use AI generation."
+            return
+        }
+        let model = aiModel
+        let ctx = presetControlContext
+        aiBusy = true
+        appendConsole("✨ Generating with \(model): \(prompt)")
+        Task {
+            do {
+                let lua = try await AIClient.generateLua(request: prompt, presetContext: ctx, model: model, apiKey: key)
+                setLuaSource(lua)
+                appendConsole("✓ Script generated (\(lua.split(separator: "\n").count) lines). Review, Build, and Run.")
+                aiPrompt = ""
+            } catch {
+                let msg = (error as? AIClient.AIError)?.description ?? error.localizedDescription
+                appendConsole("✗ AI error: \(msg)")
+                message = "AI error: \(msg)"
+            }
+            aiBusy = false
+        }
     }
 
     func newDocument() {
