@@ -859,7 +859,7 @@ private struct ScriptEditor: View {
             toolbar
             Divider()
             VSplitView {
-                CodeEditor(text: Binding(get: { model.luaSource }, set: { model.setLuaSource($0) }))
+                LuaCodeView(text: Binding(get: { model.luaSource }, set: { model.setLuaSource($0) }))
                     .frame(minHeight: 180)
                 ConsolePane(text: model.luaConsole) { model.clearConsole() }
                     .frame(minHeight: 120)
@@ -889,39 +889,6 @@ private struct ScriptEditor: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(ElectraTheme.surface)
-    }
-}
-
-/// A monospaced code editor with a simple line-number gutter.
-private struct CodeEditor: View {
-    @Binding var text: String
-
-    var body: some View {
-        ScrollView([.vertical]) {
-            HStack(alignment: .top, spacing: 0) {
-                gutter
-                TextEditor(text: $text)
-                    .font(.system(size: 12, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .background(Color.black)
-                    .frame(minHeight: 400, alignment: .topLeading)
-            }
-        }
-        .background(Color.black)
-    }
-
-    private var gutter: some View {
-        let lines = max(1, text.components(separatedBy: "\n").count)
-        return VStack(alignment: .trailing, spacing: 0) {
-            ForEach(1...lines, id: \.self) { n in
-                Text("\(n)")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.25))
-                    .frame(height: 15.5, alignment: .trailing)
-            }
-        }
-        .padding(.top, 8).padding(.horizontal, 8)
-        .background(Color.white.opacity(0.03))
     }
 }
 
