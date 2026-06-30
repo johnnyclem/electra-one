@@ -901,7 +901,14 @@ private struct ScriptEditor: View {
 
     private var aiBar: some View {
         HStack(spacing: 8) {
-            Image(systemName: "sparkles").foregroundStyle(.purple)
+            Menu {
+                ForEach(AIClient.examples, id: \.self) { ex in
+                    Button(ex) { model.aiPrompt = ex }
+                }
+            } label: {
+                Image(systemName: "sparkles").foregroundStyle(.purple)
+            }
+            .menuStyle(.borderlessButton).frame(width: 28).help("Example prompts")
             TextField("Describe the script you want (e.g. “make control 13 a 5-item algorithm list that recolors the params”)",
                       text: $model.aiPrompt)
                 .textFieldStyle(.roundedBorder)

@@ -51,7 +51,14 @@ enum AIClient {
     Write idiomatic, working scripts. Prefer onReady() for initialization. Keep comments concise.
     """
 
-    static func generateLua(request: String, presetContext: String?, model: String, apiKey: String) async throws -> String {
+    /// Stream a generation. `onText` is called with the cumulative text so far
+    /// (latest-wins, ordered) for live display. Returns the final, fence-stripped
+    /// Lua source.
+    static func streamLua(request: String,
+                          presetContext: String?,
+                          model: String,
+                          apiKey: String,
+                          onText: @escaping (String) async -> Void) async throws -> String {
         guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
             throw AIError.network("bad URL")
         }
@@ -63,6 +70,7 @@ enum AIClient {
         let body: [String: Any] = [
             "model": model,
             "max_tokens": 8000,
+            "stream": true,
             "system": systemPrompt,
             "messages": [["role": "user", "content": userText]],
         ]
@@ -75,33 +83,64 @@ enum AIClient {
         req.setValue("application/json", forHTTPHeaderField: "content-type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response): (Data, URLResponse)
+        let (bytes, response): (URLSession.AsyncBytes, URLResponse)
         do {
-            (data, response) = try await URLSession.shared.data(for: req)
+            (bytes, response) = try await URLSession.shared.bytes(for: req)
         } catch {
             throw AIError.network(error.localizedDescription)
         }
-
         guard let http = response as? HTTPURLResponse else { throw AIError.network("no response") }
+
         guard (200..<300).contains(http.statusCode) else {
+            var data = Data()
+            for try await b in bytes { data.append(b) }
             let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
                 .flatMap { ($0?["error"] as? [String: Any])?["message"] as? String }
                 ?? String(data: data, encoding: .utf8) ?? "unknown"
             throw AIError.http(http.statusCode, msg)
         }
 
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let content = obj["content"] as? [[String: Any]] else {
-            throw AIError.empty
+        var full = ""
+        var lastPushed = 0
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data:") else { continue } // skip "event:" / blank lines
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            guard let d = payload.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let type = obj["type"] as? String else { continue }
+            switch type {
+            case "content_block_delta":
+                if let delta = obj["delta"] as? [String: Any],
+                   (delta["type"] as? String) == "text_delta",
+                   let t = delta["text"] as? String {
+                    full += t
+                    // Coalesce UI pushes to roughly every ~24 chars to keep highlighting smooth.
+                    if full.count - lastPushed >= 24 {
+                        lastPushed = full.count
+                        await onText(full)
+                    }
+                }
+            case "error":
+                let msg = (obj["error"] as? [String: Any])?["message"] as? String ?? "stream error"
+                throw AIError.http(http.statusCode, msg)
+            default:
+                break
+            }
         }
-        let text = content
-            .filter { ($0["type"] as? String) == "text" }
-            .compactMap { $0["text"] as? String }
-            .joined()
-        let lua = stripFences(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        await onText(full) // final flush
+        let lua = stripFences(full).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !lua.isEmpty else { throw AIError.empty }
         return lua
     }
+
+    /// Example prompts surfaced in the AI bar.
+    static let examples: [String] = [
+        "Make control 13 a list that selects an algorithm (Space, PitchFactor, TimeFactor, ModFactor, H9) and recolors the parameter controls to match each algorithm.",
+        "Add an LFO on a timer that sweeps CC 1 from 0 to 127 as a sine wave a few times per second.",
+        "When pad 9 is pressed send MIDI Start, and when pad 10 is pressed send MIDI Stop.",
+        "Create a 12-item overlay list for control 14 and print the selected label when it changes.",
+        "On preset load, set every fader's name to its CC number and color them all blue.",
+    ]
 
     /// Remove ```lua / ``` fences if the model wrapped the code despite instructions.
     private static func stripFences(_ s: String) -> String {

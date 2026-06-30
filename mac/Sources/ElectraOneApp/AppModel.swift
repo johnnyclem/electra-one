@@ -315,10 +315,14 @@ final class AppModel: ObservableObject {
         let model = aiModel
         let ctx = presetControlContext
         aiBusy = true
-        appendConsole("✨ Generating with \(model): \(prompt)")
+        luaSource = "" // clear; tokens stream in live
+        appendConsole("✨ Streaming with \(model): \(prompt)")
         Task {
             do {
-                let lua = try await AIClient.generateLua(request: prompt, presetContext: ctx, model: model, apiKey: key)
+                let lua = try await AIClient.streamLua(
+                    request: prompt, presetContext: ctx, model: model, apiKey: key,
+                    onText: { soFar in await MainActor.run { self.luaSource = soFar } })
+                // Commit the final (fence-stripped) source to the document + undo/dirty.
                 setLuaSource(lua)
                 appendConsole("✓ Script generated (\(lua.split(separator: "\n").count) lines). Review, Build, and Run.")
                 aiPrompt = ""
