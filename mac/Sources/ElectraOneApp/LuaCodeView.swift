@@ -8,7 +8,7 @@ struct LuaCodeView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    func makeNSView(context: Context) -> NSScrollView {
+    func makeNSView(context: Context) -> NSView {
         // Build the text stack on TextKit 1 explicitly. On macOS 26,
         // `NSTextView.scrollableTextView()` hands back a TextKit 2 view; once we
         // attach a custom NSRulerView (line numbers) and touch its layout
@@ -16,6 +16,12 @@ struct LuaCodeView: NSViewRepresentable {
         // line numbers but the code is invisible, at any text color. Creating an
         // NSLayoutManager and wiring the storage/container/text view by hand pins
         // the whole thing to TextKit 1, which renders reliably.
+        //
+        // Line numbers are NOT drawn with an NSRulerView: under SwiftUI hosting
+        // an NSRulerView attached to this scroll view suppresses the text view's
+        // glyph drawing (the gutter renders but the code disappears — the exact
+        // "invisible text" bug). Instead we place a plain sibling gutter view to
+        // the left and redraw it as the text scrolls.
         let textStorage = NSTextStorage()
         let layoutManager = NSLayoutManager()
         textStorage.addLayoutManager(layoutManager)
@@ -44,15 +50,12 @@ struct LuaCodeView: NSViewRepresentable {
         // text toward the dark background until the code disappears. The opt-out
         // flag is unreliable on recent macOS, so we also pin the editor to the
         // LIGHT appearance — that mapping only runs in dark appearance, so under
-        // aqua our explicit colors render exactly as set. (The TextKit-1 stack
-        // above is what makes the glyphs lay out and draw in the first place; this
-        // is what makes them the right color.)
+        // aqua our explicit colors render exactly as set.
         let lightAppearance = NSAppearance(named: .aqua)
         textView.appearance = lightAppearance
         if #available(macOS 14.0, *) {
             textView.usesAdaptiveColorMappingForDarkAppearance = false
         }
-        // Keep freshly-typed characters in the visible foreground color too.
         textView.typingAttributes = [.font: LuaTheme.font, .foregroundColor: LuaTheme.plain]
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
@@ -69,37 +72,64 @@ struct LuaCodeView: NSViewRepresentable {
         scroll.backgroundColor = LuaTheme.background
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false
-        scroll.hasVerticalRuler = true
-        scroll.rulersVisible = true
-        let ruler = LineNumberRuler(textView: textView)
-        scroll.verticalRulerView = ruler
-        context.coordinator.ruler = ruler
+
+        let gutter = LineNumberGutter(textView: textView)
+        gutter.appearance = lightAppearance
+        context.coordinator.gutter = gutter
+        context.coordinator.textView = textView
+
+        // Container: fixed-width gutter on the left, scroll view fills the rest.
+        let host = NSView()
+        gutter.translatesAutoresizingMaskIntoConstraints = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(gutter)
+        host.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            gutter.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            gutter.topAnchor.constraint(equalTo: host.topAnchor),
+            gutter.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            gutter.widthAnchor.constraint(equalToConstant: LineNumberGutter.width),
+            scroll.leadingAnchor.constraint(equalTo: gutter.trailingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: host.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+        ])
+
+        // Redraw the gutter whenever the text scrolls.
+        let clip = scroll.contentView
+        clip.postsBoundsChangedNotifications = true
+        context.coordinator.scrollObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
+        ) { [weak gutter] _ in gutter?.needsDisplay = true }
 
         LuaHighlighter.apply(to: textView)
-        return scroll
+        return host
     }
 
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let textView = scroll.documentView as? NSTextView else { return }
+    func updateNSView(_ host: NSView, context: Context) {
+        guard let textView = context.coordinator.textView else { return }
         if textView.string != text {
             let sel = textView.selectedRange()
             textView.string = text
             LuaHighlighter.apply(to: textView)
             textView.setSelectedRange(NSRange(location: min(sel.location, (text as NSString).length), length: 0))
-            context.coordinator.ruler?.needsDisplay = true
         }
+        context.coordinator.gutter?.needsDisplay = true
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         let parent: LuaCodeView
-        var ruler: LineNumberRuler?
+        weak var gutter: LineNumberGutter?
+        weak var textView: NSTextView?
+        var scrollObserver: NSObjectProtocol?
         init(_ parent: LuaCodeView) { self.parent = parent }
+        deinit { if let o = scrollObserver { NotificationCenter.default.removeObserver(o) } }
 
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
             parent.text = tv.string
             LuaHighlighter.apply(to: tv)
-            ruler?.needsDisplay = true
+            gutter?.needsDisplay = true
         }
     }
 }
@@ -107,9 +137,6 @@ struct LuaCodeView: NSViewRepresentable {
 // MARK: - Theme
 
 enum LuaTheme {
-    // Light editor theme: dark ink on a near-white page, with syntax colors
-    // chosen to stay legible against the light background. The editor is pinned
-    // to the .aqua (light) appearance in makeNSView, so these render as set.
     static let font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
     static let background = NSColor(calibratedRed: 0.99, green: 0.99, blue: 0.99, alpha: 1)
     static let plain = NSColor(calibratedRed: 0.12, green: 0.12, blue: 0.14, alpha: 1)
@@ -130,7 +157,6 @@ enum LuaHighlighter {
         "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return",
         "then", "true", "until", "while",
     ]
-    // Electra One Lua globals worth distinguishing.
     private static let apiGlobals: Set<String> = [
         "controls", "control", "parameterMap", "midi", "timer", "info", "window",
         "helpers", "overlays", "controller", "transport", "patch", "groups",
@@ -166,8 +192,7 @@ enum LuaHighlighter {
         while i < n {
             let c = s.character(at: i)
 
-            // Long bracket [[ ]] / [=[ ]=] (string or, after --, comment handled below)
-            if c == 0x5B { // [
+            if c == 0x5B {
                 if let close = longBracketEnd(s, open: i) {
                     out.append(Tok(range: NSRange(location: i, length: close - i), color: LuaTheme.string))
                     i = close
@@ -175,15 +200,12 @@ enum LuaHighlighter {
                 }
             }
 
-            // Comment
-            if c == 0x2D, i + 1 < n, s.character(at: i + 1) == 0x2D { // --
-                // block comment --[[ ... ]]
+            if c == 0x2D, i + 1 < n, s.character(at: i + 1) == 0x2D {
                 if i + 2 < n, s.character(at: i + 2) == 0x5B, let close = longBracketEnd(s, open: i + 2) {
                     out.append(Tok(range: NSRange(location: i, length: close - i), color: LuaTheme.comment))
                     i = close
                     continue
                 }
-                // line comment
                 var j = i + 2
                 while j < n, s.character(at: j) != 0x0A { j += 1 }
                 out.append(Tok(range: NSRange(location: i, length: j - i), color: LuaTheme.comment))
@@ -191,13 +213,12 @@ enum LuaHighlighter {
                 continue
             }
 
-            // String "..." or '...'
             if c == 0x22 || c == 0x27 {
                 let quote = c
                 var j = i + 1
                 while j < n {
                     let cj = s.character(at: j)
-                    if cj == 0x5C { j += 2; continue } // escape
+                    if cj == 0x5C { j += 2; continue }
                     if cj == quote || cj == 0x0A { j += 1; break }
                     j += 1
                 }
@@ -206,13 +227,12 @@ enum LuaHighlighter {
                 continue
             }
 
-            // Number
             if isDigit(c) || (c == 0x2E && i + 1 < n && isDigit(s.character(at: i + 1))) {
                 var j = i + 1
                 while j < n {
                     let cj = s.character(at: j)
-                    if isDigit(cj) || cj == 0x2E || cj == 0x78 || cj == 0x58 // . x X
-                        || (cj >= 65 && cj <= 70) || (cj >= 97 && cj <= 102) // hex a-f
+                    if isDigit(cj) || cj == 0x2E || cj == 0x78 || cj == 0x58
+                        || (cj >= 65 && cj <= 70) || (cj >= 97 && cj <= 102)
                         || cj == 0x65 || cj == 0x45 || cj == 0x2B || cj == 0x2D { j += 1 } else { break }
                 }
                 out.append(Tok(range: NSRange(location: i, length: j - i), color: LuaTheme.number))
@@ -220,7 +240,6 @@ enum LuaHighlighter {
                 continue
             }
 
-            // Identifier / keyword / api
             if isIdentStart(c) {
                 var j = i + 1
                 while j < n, isIdent(s.character(at: j)) { j += 1 }
@@ -230,7 +249,6 @@ enum LuaHighlighter {
                 } else if apiGlobals.contains(word) {
                     out.append(Tok(range: NSRange(location: i, length: j - i), color: LuaTheme.api))
                 } else {
-                    // function NAME(...)  → color the name
                     let prev = precedingWord(s, before: i)
                     if prev == "function" {
                         out.append(Tok(range: NSRange(location: i, length: j - i), color: LuaTheme.funcName))
@@ -245,25 +263,22 @@ enum LuaHighlighter {
         return out
     }
 
-    /// Returns the end index (exclusive) of a long-bracket span starting at
-    /// `open` (which must be '['), or nil if it isn't a valid long bracket.
     private static func longBracketEnd(_ s: NSString, open: Int) -> Int? {
         let n = s.length
         var k = open + 1
         var level = 0
-        while k < n, s.character(at: k) == 0x3D { level += 1; k += 1 } // =
-        guard k < n, s.character(at: k) == 0x5B else { return nil }     // need second [
+        while k < n, s.character(at: k) == 0x3D { level += 1; k += 1 }
+        guard k < n, s.character(at: k) == 0x5B else { return nil }
         k += 1
-        // find closing ] =*level ]
         while k < n {
-            if s.character(at: k) == 0x5D { // ]
+            if s.character(at: k) == 0x5D {
                 var m = k + 1, lv = 0
                 while m < n, s.character(at: m) == 0x3D { lv += 1; m += 1 }
                 if lv == level, m < n, s.character(at: m) == 0x5D { return m + 1 }
             }
             k += 1
         }
-        return n // unterminated — to end
+        return n
     }
 
     private static func precedingWord(_ s: NSString, before idx: Int) -> String {
@@ -280,23 +295,28 @@ enum LuaHighlighter {
     }
 }
 
-// MARK: - Line-number ruler
+// MARK: - Line-number gutter (plain NSView, not NSRulerView)
 
-final class LineNumberRuler: NSRulerView {
+final class LineNumberGutter: NSView {
+    static let width: CGFloat = 38
+    private weak var textView: NSTextView?
+
     init(textView: NSTextView) {
-        super.init(scrollView: textView.enclosingScrollView, orientation: .verticalRuler)
-        self.clientView = textView
-        self.ruleThickness = 38
+        self.textView = textView
+        super.init(frame: NSRect(x: 0, y: 0, width: LineNumberGutter.width, height: 100))
     }
-    required init(coder: NSCoder) { fatalError() }
+    required init?(coder: NSCoder) { fatalError() }
 
-    override func drawHashMarksAndLabels(in rect: NSRect) {
-        guard let textView = clientView as? NSTextView,
+    // Flipped so y grows downward, matching the text view's visible geometry.
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        LuaTheme.background.setFill()
+        bounds.fill()
+
+        guard let textView,
               let layout = textView.layoutManager,
               let container = textView.textContainer else { return }
-
-        LuaTheme.background.setFill()
-        rect.fill()
 
         let ns = textView.string as NSString
         let visible = textView.visibleRect
@@ -306,12 +326,10 @@ final class LineNumberRuler: NSRulerView {
             .foregroundColor: LuaTheme.gutter,
         ]
 
-        // Map glyph ranges to line numbers by counting newlines up to each line start.
         var lineNo = 1
         var charIndex = 0
         let glyphRange = layout.glyphRange(forBoundingRect: visible, in: container)
         let firstChar = layout.characterIndexForGlyph(at: glyphRange.location)
-        // count lines before the first visible character
         if firstChar > 0 {
             lineNo += ns.substring(to: firstChar).reduce(0) { $0 + ($1 == "\n" ? 1 : 0) }
         }
@@ -323,14 +341,14 @@ final class LineNumberRuler: NSRulerView {
             if glyphLine.length == 0 { glyphLine = NSRange(location: layout.numberOfGlyphs, length: 0) }
             let lineRect = layout.boundingRect(forGlyphRange: glyphLine, in: container)
             let y = lineRect.minY + inset - visible.minY
-            if y > rect.maxY { break }
-            if y + lineRect.height >= rect.minY {
+            if y > bounds.maxY { break }
+            if y + lineRect.height >= bounds.minY {
                 let label = "\(lineNo)" as NSString
                 let size = label.size(withAttributes: attrs)
-                label.draw(at: NSPoint(x: ruleThickness - size.width - 5, y: y + 1), withAttributes: attrs)
+                label.draw(at: NSPoint(x: LineNumberGutter.width - size.width - 5, y: y + 1), withAttributes: attrs)
             }
             lineNo += 1
-            if lineRange.location + lineRange.length <= charIndex { break } // safety
+            if lineRange.location + lineRange.length <= charIndex { break }
             charIndex = lineRange.location + lineRange.length
             if charIndex >= ns.length, ns.length == 0 || ns.character(at: ns.length - 1) != 0x0A { break }
         }
