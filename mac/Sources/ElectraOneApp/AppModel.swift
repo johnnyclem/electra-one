@@ -102,12 +102,11 @@ final class AppModel: ObservableObject {
 
     init() {
         slots = (0..<slotsPerBank).map { SlotState(slot: $0, status: .unknown) }
-        // Seed a first-run library with the built-in example so it's never empty,
-        // then surface whatever's on disk.
-        if scriptLibrary.scripts.isEmpty {
-            scriptLibrary.add(LibraryScript(name: "Hello World (example)",
-                                            source: AppModel.sampleScript, origin: .sample))
-        }
+        // Seed the built-in example scripts (once), so the library ships with a
+        // set of known-good Electra One Lua examples covering MIDI and visuals.
+        // Existing users pick up the set too; their own scripts are untouched.
+        scriptLibrary.seedExamples(
+            ExampleLuaScripts.all.map { ($0.name, $0.source) }, version: 1)
         libraryScripts = scriptLibrary.scripts
     }
 

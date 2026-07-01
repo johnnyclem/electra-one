@@ -86,6 +86,25 @@ final class ScriptLibrary {
         return scripts.contains { $0.source.trimmingCharacters(in: .whitespacesAndNewlines) == needle }
     }
 
+    /// Seed the built-in example scripts, at most once per `version`. Only adds
+    /// examples whose name isn't already present, so a user's own edits and
+    /// deletions survive; bump `version` to push a refreshed set to existing
+    /// users. Newly-added examples land at the top in declared order.
+    @discardableResult
+    func seedExamples(_ examples: [(name: String, source: String)], version: Int) -> Bool {
+        let key = "ScriptLibrary.seededExamplesVersion"
+        guard UserDefaults.standard.integer(forKey: key) < version else { return false }
+        let existing = Set(scripts.map(\.name))
+        var added = false
+        for ex in examples.reversed() where !existing.contains(ex.name) {
+            scripts.insert(LibraryScript(name: ex.name, source: ex.source, origin: .sample), at: 0)
+            added = true
+        }
+        UserDefaults.standard.set(version, forKey: key)
+        if added { save() }
+        return added
+    }
+
     /// A unique, human-friendly default name given a desired base.
     func uniqueName(basedOn base: String) -> String {
         let trimmed = base.trimmingCharacters(in: .whitespaces)
