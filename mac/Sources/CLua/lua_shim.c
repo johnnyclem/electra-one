@@ -56,7 +56,11 @@ static const char *PREAMBLE =
 "setmetatable(_G, { __index = function(_, k) return mock(k) end })\n"
 /* a few commonly-read constants scripts compare against */
 "PORT_1=1 PORT_2=2 PORT_CTRL=3 USB_DEV=0 USB_HOST=1 MIDI_IO=2\n"
-"RED='RED' ORANGE='ORANGE' YELLOW='YELLOW' GREEN='GREEN' BLUE='BLUE' PURPLE='PURPLE' WHITE='WHITE'\n"
+/* device-accurate 24-bit colors so graphics recording draws the right hue */
+"WHITE=0xFFFFFF RED=0xF20530 ORANGE=0xF57000 YELLOW=0xFFD500 GREEN=0x00A000 BLUE=0x0060C0 PURPLE=0xA000C0\n"
+"X=1 Y=2 WIDTH=3 HEIGHT=4\n"
+"LEFT=0 CENTER=1 RIGHT=2\n"
+"TOP_LEFT=0 TOP_RIGHT=1 BOTTOM_LEFT=2 BOTTOM_RIGHT=3\n"
 /* ── simulator-observable modules ───────────────────────────────────────────── */
 "__sim_bottom = nil\n"
 "info = setmetatable({\n"
@@ -70,7 +74,73 @@ static const char *PREAMBLE =
 "  uptime = function() return 0 end,\n"
 "  isRequired = function() return true end,\n"
 "  require = function() return true end,\n"
-"}, { __index = function() return function() end end })\n";
+"}, { __index = function() return function() end end })\n"
+/* ── graphics recorder ──────────────────────────────────────────────────────
+ * A real `graphics` module that records every draw call into `__draw` so the
+ * host can replay them on a canvas (this is what makes script-drawn Custom
+ * controls actually render in-app). Each op is a fixed row:
+ *   op, x, y, a, b, c, d, color, text   (unused numeric slots are 0). */
+"__draw = {}\n"
+"__cur_color = 0xFFFFFF\n"
+"__paint_cbs = {}\n"
+"__ctl_cache = {}\n"
+"__render_val = 0\n"
+"local function __push(op,x,y,a,b,c,d,text)\n"
+"  __draw[#__draw+1] = {op=op, x=x or 0, y=y or 0, a=a or 0, b=b or 0, c=c or 0, d=d or 0, color=__cur_color, text=text}\n"
+"end\n"
+"graphics = {\n"
+"  setColor      = function(c) __cur_color = c or 0xFFFFFF end,\n"
+"  drawPixel     = function(x,y) __push('pixel',x,y) end,\n"
+"  drawLine      = function(x1,y1,x2,y2) __push('line',x1,y1,x2,y2) end,\n"
+"  drawRect      = function(x,y,w,h) __push('rect',x,y,w,h) end,\n"
+"  fillRect      = function(x,y,w,h) __push('fillRect',x,y,w,h) end,\n"
+"  drawRoundRect = function(x,y,w,h,r) __push('roundRect',x,y,w,h,r) end,\n"
+"  fillRoundRect = function(x,y,w,h,r) __push('fillRoundRect',x,y,w,h,r) end,\n"
+"  drawTriangle  = function(x1,y1,x2,y2,x3,y3) __push('triangle',x1,y1,x2,y2,x3,y3) end,\n"
+"  fillTriangle  = function(x1,y1,x2,y2,x3,y3) __push('fillTriangle',x1,y1,x2,y2,x3,y3) end,\n"
+"  drawCircle    = function(x,y,r) __push('circle',x,y,r) end,\n"
+"  fillCircle    = function(x,y,r) __push('fillCircle',x,y,r) end,\n"
+"  drawEllipse   = function(x,y,rx,ry) __push('ellipse',x,y,rx,ry) end,\n"
+"  fillEllipse   = function(x,y,rx,ry) __push('fillEllipse',x,y,rx,ry) end,\n"
+"  fillCurve     = function(x,y,r,seg) __push('curve',x,y,r,seg) end,\n"
+"  print         = function(x,y,text,w,a) __push('text',x,y,w,a,0,0,tostring(text)) end,\n"
+"}\n"
+/* controls.get(id): a permissive control whose setPaintCallback is captured and
+ * whose getBounds reflects the size the host asked us to render at. */
+"local function __makeControl(id)\n"
+"  local bounds = {0,0,0,0}\n"
+"  local self = {}\n"
+"  self.getBounds = function() return {bounds[1],bounds[2],bounds[3],bounds[4]} end\n"
+"  self.setBounds = function(b) if type(b)=='table' then bounds={b[1] or 0,b[2] or 0,b[3] or 0,b[4] or 0} end end\n"
+"  self.setPaintCallback = function(a,b) __paint_cbs[id] = b or a end\n"
+"  self.repaint = function() end\n"
+"  self.getValue = function() return __render_val end\n"
+"  self.__setbounds = function(b) bounds = b end\n"
+"  return setmetatable(self, { __index = function() return function() return self end end })\n"
+"end\n"
+"controls = setmetatable({\n"
+"  get = function(id) if not __ctl_cache[id] then __ctl_cache[id]=__makeControl(id) end return __ctl_cache[id] end,\n"
+"}, { __index = function() return function() end end })\n"
+/* serialize + render one control's paint callback at a given size/value */
+"function __serialize(ops)\n"
+"  local t = {}\n"
+"  for i=1,#ops do\n"
+"    local o = ops[i]\n"
+"    local text = o.text and o.text:gsub('[\\t\\n\\r]',' ') or ''\n"
+"    t[#t+1] = string.format('%s\\t%g\\t%g\\t%g\\t%g\\t%g\\t%g\\t%d\\t%s', o.op, o.x, o.y, o.a, o.b, o.c, o.d, o.color, text)\n"
+"  end\n"
+"  return table.concat(t, '\\n')\n"
+"end\n"
+"function __render(id, w, h, frac)\n"
+"  __draw = {}\n"
+"  __cur_color = 0xFFFFFF\n"
+"  __render_val = math.floor((frac or 0)*127 + 0.5)\n"
+"  local ctl = controls.get(id)\n"
+"  ctl.__setbounds({0,0,w,h})\n"
+"  local cb = __paint_cbs[id]\n"
+"  if cb then pcall(cb, ctl) end\n"
+"  __draw_json = __serialize(__draw)\n"
+"end\n";
 
 static void install_print(lua_State *L, clua_writer w, void *ctx) {
     lua_pushlightuserdata(L, (void *)w);
@@ -128,6 +198,17 @@ int clua_run(lua_State *L, const char *src) {
             lua_pop(L, 1);
         }
     }
+    return 0;
+}
+
+int clua_render(lua_State *L, int id, double w, double h, double frac) {
+    lua_getglobal(L, "__render");
+    if (!lua_isfunction(L, -1)) { lua_pop(L, 1); return -1; }
+    lua_pushinteger(L, id);
+    lua_pushnumber(L, w);
+    lua_pushnumber(L, h);
+    lua_pushnumber(L, frac);
+    if (lua_pcall(L, 4, 0, 0) != LUA_OK) { lua_pop(L, 1); return -1; }
     return 0;
 }
 

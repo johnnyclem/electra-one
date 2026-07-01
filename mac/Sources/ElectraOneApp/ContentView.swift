@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ElectraKit
+import LuaKit
 import UniformTypeIdentifiers
 
 // MARK: - Theme (from the UX design, hardware-inspired)
@@ -485,6 +486,7 @@ private struct ControlSetBands: View {
 // MARK: - Control
 
 private struct RichControl: View {
+    @EnvironmentObject var model: AppModel
     let control: PresetDocument.Control
     let scale: Double
     let selected: Bool
@@ -562,32 +564,20 @@ private struct RichControl: View {
                 .overlay(Text("▾").font(.system(size: max(7, 9 * scale * 1.4))).foregroundStyle(color))
                 .frame(height: max(8, h * 0.35))
         case .vfader:
-            HStack {
-                Spacer()
-                GeometryReader { g in
-                    ZStack(alignment: .bottom) {
-                        Capsule().fill(Color.white.opacity(0.12))
-                        Capsule().fill(color).frame(height: g.size.height * fillFraction)
-                    }
-                }
-                .frame(width: max(4, 6 * scale * 1.4))
-                Spacer()
-            }
+            FaderShape(color: color, fraction: fillFraction, vertical: true)
+                .padding(.vertical, 2)
         case .knob:
             KnobShape(color: color, fraction: fillFraction)
                 .padding(.vertical, 2)
+        case .custom:
+            CustomControlCanvas(controlId: control.id, fraction: fillFraction)
+                .clipShape(RoundedRectangle(cornerRadius: 3))
         case .adsr:
             ADSRShape(color: color).padding(.horizontal, 2).padding(.bottom, 2)
         case .fader:
             VStack(spacing: 2) {
-                Spacer(minLength: 0)
-                GeometryReader { g in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.12))
-                        Capsule().fill(color).frame(width: g.size.width * fillFraction)
-                    }
-                }
-                .frame(height: max(4, 6 * scale * 1.4))
+                FaderShape(color: color, fraction: fillFraction, vertical: false)
+                    .frame(maxHeight: .infinity)
                 Text(valueLabel).font(.system(size: max(6, 8 * scale * 1.4), design: .monospaced))
                     .foregroundStyle(.white.opacity(0.6))
             }
@@ -600,6 +590,158 @@ private struct RichControl: View {
     private var valueLabel: String {
         if let p = control.parameterNumber, let t = control.messageType { return "\(t) \(p)" }
         return control.messageType ?? ""
+    }
+}
+
+extension Color {
+    /// Build a Color from a 24-bit RGB integer (as Electra `graphics` uses).
+    init(rgb: UInt32) {
+        self = Color(red: Double((rgb >> 16) & 0xff) / 255,
+                     green: Double((rgb >> 8) & 0xff) / 255,
+                     blue: Double(rgb & 0xff) / 255)
+    }
+}
+
+/// Renders a Custom control by running its Lua paint callback and replaying the
+/// recorded `graphics.*` draw ops on a Canvas. This is what makes a script-drawn
+/// control actually appear — and it updates live as the paint script is edited.
+private struct CustomControlCanvas: View {
+    @EnvironmentObject var model: AppModel
+    let controlId: Int
+    let fraction: Double
+
+    var body: some View {
+        GeometryReader { g in
+            let W = Double(g.size.width), H = Double(g.size.height)
+            let result = model.renderCustomControl(id: controlId, width: W, height: H, fraction: fraction)
+            Canvas { ctx, _ in
+                for op in result.ops { Self.draw(op, in: &ctx) }
+            }
+            .overlay {
+                if result.ops.isEmpty {
+                    Text(result.error != nil ? "paint: attach a\nsetPaintCallback" : "empty")
+                        .font(.system(size: 8)).multilineTextAlignment(.center)
+                        .foregroundStyle(.white.opacity(0.35))
+                }
+            }
+        }
+    }
+
+    private static func draw(_ op: LuaEngine.DrawOp, in ctx: inout GraphicsContext) {
+        let c = Color(rgb: op.color)
+        let (x, y, a, b, cc, d) = (op.x, op.y, op.a, op.b, op.c, op.d)
+        switch op.op {
+        case "pixel":
+            ctx.fill(Path(CGRect(x: x, y: y, width: 1, height: 1)), with: .color(c))
+        case "line":
+            var p = Path(); p.move(to: CGPoint(x: x, y: y)); p.addLine(to: CGPoint(x: a, y: b))
+            ctx.stroke(p, with: .color(c), lineWidth: 1)
+        case "rect":
+            ctx.stroke(Path(CGRect(x: x, y: y, width: a, height: b)), with: .color(c), lineWidth: 1)
+        case "fillRect":
+            ctx.fill(Path(CGRect(x: x, y: y, width: a, height: b)), with: .color(c))
+        case "roundRect":
+            ctx.stroke(Path(roundedRect: CGRect(x: x, y: y, width: a, height: b), cornerRadius: cc), with: .color(c), lineWidth: 1)
+        case "fillRoundRect":
+            ctx.fill(Path(roundedRect: CGRect(x: x, y: y, width: a, height: b), cornerRadius: cc), with: .color(c))
+        case "triangle", "fillTriangle":
+            var p = Path()
+            p.move(to: CGPoint(x: x, y: y)); p.addLine(to: CGPoint(x: a, y: b))
+            p.addLine(to: CGPoint(x: cc, y: d)); p.closeSubpath()
+            if op.op == "triangle" { ctx.stroke(p, with: .color(c), lineWidth: 1) } else { ctx.fill(p, with: .color(c)) }
+        case "circle", "fillCircle":
+            let r = CGRect(x: x - a, y: y - a, width: a * 2, height: a * 2)
+            if op.op == "circle" { ctx.stroke(Path(ellipseIn: r), with: .color(c), lineWidth: 1) } else { ctx.fill(Path(ellipseIn: r), with: .color(c)) }
+        case "ellipse", "fillEllipse":
+            let r = CGRect(x: x - a, y: y - b, width: a * 2, height: b * 2)
+            if op.op == "ellipse" { ctx.stroke(Path(ellipseIn: r), with: .color(c), lineWidth: 1) } else { ctx.fill(Path(ellipseIn: r), with: .color(c)) }
+        case "curve":
+            // Filled quarter-circle segment (b selects the quadrant 0..3).
+            var p = Path(); let start = [180.0, 270.0, 90.0, 0.0][Int(b) % 4]
+            p.move(to: CGPoint(x: x, y: y))
+            p.addArc(center: CGPoint(x: x, y: y), radius: a,
+                     startAngle: .degrees(start), endAngle: .degrees(start + 90), clockwise: false)
+            p.closeSubpath(); ctx.fill(p, with: .color(c))
+        case "text":
+            let text = Text(op.text).font(.system(size: 10)).foregroundColor(c)
+            let anchor: UnitPoint = b == 1 ? .top : (b == 2 ? .topTrailing : .topLeading)
+            let px = b == 1 ? x + a / 2 : (b == 2 ? x + a : x)
+            ctx.draw(text, at: CGPoint(x: px, y: y), anchor: anchor)
+        default: break
+        }
+    }
+}
+
+/// Hardware-style fader: a recessed slot, a colored fill up to the value, and a
+/// chunky metallic cap (thumb) with a colored indicator line — modelled on the
+/// Electra One's physical faders. Works vertically (bottom→top) or horizontally
+/// (left→right).
+private struct FaderShape: View {
+    let color: Color
+    var fraction: CGFloat
+    var vertical: Bool = true
+
+    var body: some View {
+        GeometryReader { g in
+            let W = g.size.width, H = g.size.height
+            ZStack {
+                if vertical {
+                    let trackW = max(3, W * 0.20)
+                    let capW = min(W * 0.74, trackW + 12)
+                    let capH = max(6, H * 0.15)
+                    let travel = max(0, H - capH)
+                    let capCenterY = capH / 2 + travel * (1 - min(max(fraction, 0), 1))
+                    slot(width: trackW, height: H)
+                    // colored fill from the bottom up to the cap centre
+                    Capsule().fill(color.opacity(0.9))
+                        .frame(width: trackW, height: max(0, H - capCenterY))
+                        .frame(height: H, alignment: .bottom)
+                    cap(w: capW, h: capH, axisVertical: true)
+                        .position(x: W / 2, y: capCenterY)
+                } else {
+                    let trackH = max(3, H * 0.34)
+                    let capH = min(H, max(H * 0.82, trackH + 10))
+                    let capW = max(6, W * 0.10)
+                    let travel = max(0, W - capW)
+                    let capCenterX = capW / 2 + travel * min(max(fraction, 0), 1)
+                    slot(width: W, height: trackH)
+                    Capsule().fill(color.opacity(0.9))
+                        .frame(width: max(0, capCenterX), height: trackH)
+                        .frame(width: W, alignment: .leading)
+                    cap(w: capW, h: capH, axisVertical: false)
+                        .position(x: capCenterX, y: H / 2)
+                }
+            }
+            .frame(width: W, height: H)
+        }
+    }
+
+    /// The recessed track the cap rides in.
+    private func slot(width: CGFloat, height: CGFloat) -> some View {
+        Capsule().fill(Color.black.opacity(0.5))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.06), lineWidth: 1))
+            .frame(width: width, height: height)
+    }
+
+    /// A metallic cap with a colored indicator line across its short axis.
+    private func cap(w: CGFloat, h: CGFloat, axisVertical: Bool) -> some View {
+        let r = max(1.5, min(w, h) * 0.28)
+        return RoundedRectangle(cornerRadius: r)
+            .fill(LinearGradient(colors: [Color(white: 0.92), Color(white: 0.56), Color(white: 0.74)],
+                                 startPoint: axisVertical ? .top : .leading,
+                                 endPoint: axisVertical ? .bottom : .trailing))
+            .frame(width: w, height: h)
+            .overlay(
+                Group {
+                    if axisVertical {
+                        Capsule().fill(color).frame(width: w * 0.66, height: max(1.5, h * 0.2))
+                    } else {
+                        Capsule().fill(color).frame(width: max(1.5, w * 0.2), height: h * 0.66)
+                    }
+                }
+            )
+            .overlay(RoundedRectangle(cornerRadius: r).stroke(Color.black.opacity(0.4), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.55), radius: 1.5, y: 1)
     }
 }
 
@@ -621,14 +763,23 @@ private struct KnobShape: View {
                 Circle().trim(from: 0, to: 0.75 * fraction)
                     .stroke(color, style: StrokeStyle(lineWidth: lw, lineCap: .round))
                     .rotationEffect(.degrees(135))
+                // metallic hub (the physical knob cap)
+                Circle()
+                    .fill(RadialGradient(colors: [Color(white: 0.30), Color(white: 0.13)],
+                                         center: .init(x: 0.35, y: 0.3),
+                                         startRadius: 0, endRadius: side * 0.5))
+                    .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 1))
+                    .frame(width: side * 0.52, height: side * 0.52)
+                    .shadow(color: .black.opacity(0.5), radius: 1.5, y: 1)
                 // pointer
                 Path { p in
-                    p.move(to: CGPoint(x: side / 2, y: side / 2))
                     let a = (start.degrees + sweep * Double(fraction)) * .pi / 180
-                    p.addLine(to: CGPoint(x: side / 2 + cos(a) * side * 0.32,
-                                          y: side / 2 + sin(a) * side * 0.32))
+                    p.move(to: CGPoint(x: side / 2 + cos(a) * side * 0.10,
+                                       y: side / 2 + sin(a) * side * 0.10))
+                    p.addLine(to: CGPoint(x: side / 2 + cos(a) * side * 0.30,
+                                          y: side / 2 + sin(a) * side * 0.30))
                 }
-                .stroke(color, style: StrokeStyle(lineWidth: max(1, lw * 0.6), lineCap: .round))
+                .stroke(color, style: StrokeStyle(lineWidth: max(1.5, lw * 0.7), lineCap: .round))
             }
             .frame(width: side, height: side)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -787,7 +938,14 @@ private struct Inspector: View {
                 }
             }
         }
-        if c.isScript {
+        if c.isCustom {
+            Divider()
+            Text("PAINT SCRIPT").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
+            Text("Draws its own graphics via `\(PresetDocument.paintFunctionName(forControlId: c.id))(display)` in the preset's Lua. Edit it and the control repaints live.")
+                .font(.caption).foregroundStyle(ElectraTheme.textTertiary).fixedSize(horizontal: false, vertical: true)
+            Button { model.editPaintScript(id: c.id) } label: { Label("Edit Paint Script…", systemImage: "paintbrush.pointed") }
+                .buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
+        } else if c.isScript {
             Divider()
             Text("SCRIPT").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
             Text("Runs `\(c.functionName ?? "")` in the preset's Lua. Tap ▶, double-click the control, or Run below.")

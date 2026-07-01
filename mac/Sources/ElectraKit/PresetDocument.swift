@@ -66,7 +66,7 @@ public struct PresetDocument {
     /// User-facing control kinds. Several map to the same Electra `type` with a
     /// different `variant` (a Knob is a `fader` with the `dial` variant).
     public enum ControlKind: String, CaseIterable, Sendable {
-        case fader, knob, vfader, pad, list, adsr
+        case fader, knob, vfader, pad, list, adsr, custom
 
         public var displayName: String {
             switch self {
@@ -76,6 +76,7 @@ public struct PresetDocument {
             case .pad:    return "Pad"
             case .list:   return "List"
             case .adsr:   return "ADSR"
+            case .custom: return "Custom (script)"
             }
         }
 
@@ -86,6 +87,7 @@ public struct PresetDocument {
             case .pad:          return "pad"
             case .list:         return "list"
             case .adsr:         return "adsr"
+            case .custom:       return "custom"
             }
         }
 
@@ -106,6 +108,7 @@ public struct PresetDocument {
             case "pad":    return .pad
             case "list":   return .list
             case "adsr", "adr", "dx7envelope": return .adsr
+            case "custom": return .custom
             default:       return .fader
             }
         }
@@ -139,6 +142,9 @@ public struct PresetDocument {
 
         /// A control bound to a Lua function (a "Script button").
         public var isScript: Bool { functionName?.isEmpty == false }
+
+        /// A Custom control whose graphics are drawn by a Lua paint callback.
+        public var isCustom: Bool { kind == .custom }
     }
 
     private static func parseControl(_ c: [String: Any]) -> Control? {
@@ -340,14 +346,23 @@ public struct PresetDocument {
             "id": newId,
             "type": kind.rawType,
             "visible": true,
-            "name": kind == .adsr ? "ADSR" : "CC #\(newId)",
+            "name": kind == .adsr ? "ADSR" : (kind == .custom ? "Custom" : "CC #\(newId)"),
             "color": Self.palette[1 + (newId % (Self.palette.count - 1))],
             "pageId": pageId,
             "controlSetId": SlotGeometry.controlSet(forRow: row),
         ]
         if let v = kind.rawVariant { control["variant"] = v }
 
-        if kind == .adsr {
+        if kind == .custom {
+            // A Custom control spans two columns to give the paint script room,
+            // and keeps one value so a pot can drive its rendering.
+            control["bounds"] = [b.x, b.y, b.w + SlotGeometry.pitchX, b.h].map { Int($0.rounded()) }
+            control["inputs"] = [["potId": pot, "valueId": "value"]]
+            control["values"] = [[
+                "id": "value", "defaultValue": 0,
+                "message": ["type": "cc7", "min": 0, "max": 127, "parameterNumber": newId, "deviceId": dev],
+            ]]
+        } else if kind == .adsr {
             // ADSR spans two columns and carries four CC values.
             control["bounds"] = [b.x, b.y, b.w + SlotGeometry.pitchX, b.h].map { Int($0.rounded()) }
             control["inputs"] = Self.adsrValueIds.enumerated().map { i, vid in
@@ -374,6 +389,36 @@ public struct PresetDocument {
     /// The conventional Lua function name for a script button with the given id.
     public static func scriptFunctionName(forControlId id: Int) -> String {
         "scriptBtn_\(id)"
+    }
+
+    /// The conventional Lua paint-callback function name for a Custom control.
+    public static func paintFunctionName(forControlId id: Int) -> String {
+        "paint_\(id)"
+    }
+
+    /// A starter paint callback (and its registration) for a new Custom control:
+    /// draws a value bar so the control shows something from the first frame.
+    /// Shared by the app (seeding) and tests so both use identical Lua.
+    public static func customPaintStarter(controlId id: Int, colorHex: String) -> String {
+        let fn = paintFunctionName(forControlId: id)
+        let hex = "0x" + colorHex.uppercased()
+        return """
+        -- Custom control \(id): draws its own graphics. Edit freely — the canvas
+        -- updates as you type. `display:getValue()` is the control's 0..127 value.
+        function \(fn)(display)
+          local b = display:getBounds()
+          local w, h = b[WIDTH], b[HEIGHT]
+          local v = display:getValue() / 127
+          graphics.setColor(0x1A1A20)
+          graphics.fillRect(0, 0, w, h)
+          graphics.setColor(\(hex))
+          graphics.fillRect(0, h - h * v, w, h * v)
+          graphics.setColor(WHITE)
+          graphics.print(0, h / 2 - 6, tostring(math.floor(v * 127)), w, CENTER)
+        end
+
+        controls.get(\(id)):setPaintCallback(\(fn))
+        """
     }
 
     /// Add a "Script button": a `pad` whose value invokes a Lua function. Placed

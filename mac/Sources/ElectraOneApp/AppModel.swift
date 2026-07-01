@@ -655,12 +655,45 @@ final class AppModel: ObservableObject {
     func renamePage(_ id: Int, _ name: String) { edit { $0.renamePage(id: id, to: name) } }
 
     func addControl(kind: PresetDocument.ControlKind = .fader) {
+        var createdId: Int?
+        var colorHex = "FFFFFF"
         edit { doc in
             let newId = doc.addControl(kind: kind, pageId: currentPageId)
+            createdId = newId
+            colorHex = doc.control(id: newId)?.colorHex ?? "FFFFFF"
             DispatchQueue.main.async { self.selectedControlId = newId }
         }
-        message = "Added \(kind.displayName)."
+        // A Custom control needs a paint callback to draw anything — seed a
+        // starter one into the preset's Lua and register it, so it renders live
+        // immediately (and pushes to the device already working).
+        if kind == .custom, let id = createdId {
+            seedCustomPaint(controlId: id, colorHex: colorHex)
+            editorMode = .script
+        }
+        message = kind == .custom
+            ? "Added Custom control — edit its paint script to draw."
+            : "Added \(kind.displayName)."
     }
+
+    /// Append a starter `paint_<id>` callback (and its registration) to the
+    /// preset's Lua for a new Custom control. The callback draws a value bar so
+    /// there's something on screen from the first frame.
+    private func seedCustomPaint(controlId id: Int, colorHex: String) {
+        let starter = PresetDocument.customPaintStarter(controlId: id, colorHex: colorHex)
+        setLuaSource(luaSource.isEmpty ? starter : luaSource + "\n\n" + starter)
+    }
+
+    /// Render a Custom control's paint callback against the preset's current Lua,
+    /// returning the recorded draw ops for the canvas to replay. `fraction` is the
+    /// simulated 0..1 value (no live hardware value offline).
+    func renderCustomControl(id: Int, width: Double, height: Double,
+                             fraction: Double) -> LuaEngine.PaintResult {
+        let src = luaSource.isEmpty ? (document?.lua ?? "") : luaSource
+        return lua.paint(src, controlId: id, width: width, height: height, fraction: fraction)
+    }
+
+    /// Jump to the Lua editor to edit a Custom control's paint callback.
+    func editPaintScript(id: Int) { editorMode = .script }
 
     // ── Script buttons ─────────────────────────────────────────────────────────
 
@@ -797,6 +830,14 @@ final class AppModel: ObservableObject {
 
     func setControlKind(_ id: Int, _ kind: PresetDocument.ControlKind) {
         edit { $0.setControlKind(id: id, kind) }
+        // Switching a control to Custom needs a paint callback to draw anything —
+        // seed a starter one if the preset's Lua doesn't already define it.
+        if kind == .custom {
+            let fn = PresetDocument.paintFunctionName(forControlId: id)
+            if !luaSource.contains("function \(fn)(") {
+                seedCustomPaint(controlId: id, colorHex: document?.control(id: id)?.colorHex ?? "FFFFFF")
+            }
+        }
     }
 
     func setValueParameterNumber(_ controlId: Int, valueId: String, _ n: Int) {

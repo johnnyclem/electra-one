@@ -19,6 +19,12 @@ void clua_close(lua_State *L);
  * -1 on a compile/runtime error. */
 int clua_run(lua_State *L, const char *src);
 
+/* Invoke the paint callback registered for control `id` (via setPaintCallback),
+ * rendering at size w×h with a normalized value `frac` (0..1). Records the draw
+ * calls into the `__draw_json` global. Returns 0 on success, -1 if there is no
+ * paint callback or it errors. Call after clua_run has loaded the script. */
+int clua_render(lua_State *L, int id, double w, double h, double frac);
+
 /* Read a global string variable into `out` (NUL-terminated, truncated to `cap`).
  * Returns 1 if the global was a string, 0 otherwise. Used by the simulator to
  * pull back observable state (e.g. the `__sim_bottom` status-bar text). */

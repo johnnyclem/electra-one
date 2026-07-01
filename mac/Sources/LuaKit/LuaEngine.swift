@@ -76,6 +76,73 @@ public final class LuaEngine {
         }
     }
 
+    // ── Custom-control paint rendering ─────────────────────────────────────────
+
+    /// One recorded drawing operation from a script's `graphics.*` calls.
+    /// Numeric slots `x/y/a/b/c/d` carry op-specific coordinates (see `op`);
+    /// `color` is 24-bit RGB; `text` is set only for the `text` op.
+    public struct DrawOp: Sendable {
+        public var op: String
+        public var x, y, a, b, c, d: Double
+        public var color: UInt32
+        public var text: String
+    }
+
+    public struct PaintResult: Sendable {
+        public var ops: [DrawOp]
+        public var error: String?
+        public var ok: Bool { error == nil }
+    }
+
+    /// Load `source`, then run the paint callback the script registered for
+    /// `controlId` (via `control:setPaintCallback`) at the given size and
+    /// normalized value, returning the recorded draw operations. This is what
+    /// lets a script-drawn Custom control render live in the app.
+    public func paint(_ source: String, controlId: Int,
+                      width: Double, height: Double, fraction: Double) -> PaintResult {
+        let sink = Sink()
+        let ctx = Unmanaged.passUnretained(sink).toOpaque()
+        guard let L = clua_new(Self.writer, ctx) else {
+            return PaintResult(ops: [], error: "could not create Lua state")
+        }
+        defer { clua_close(L) }
+
+        if source.withCString({ clua_run(L, $0) }) != 0 {
+            return PaintResult(ops: [], error: Self.lastLine(sink.text))
+        }
+        if clua_render(L, Int32(controlId), width, height, fraction) != 0 {
+            // No paint callback registered for this id, or it errored — not fatal;
+            // surface it as an empty canvas with a hint.
+            return PaintResult(ops: [], error: "no paint callback for control \(controlId)")
+        }
+        var buf = [CChar](repeating: 0, count: 64 * 1024)
+        guard clua_global_string(L, "__draw_json", &buf, buf.count) == 1 else {
+            return PaintResult(ops: [], error: nil)
+        }
+        return PaintResult(ops: Self.parseOps(String(cString: buf)), error: nil)
+    }
+
+    private static func lastLine(_ text: String) -> String {
+        var t = text
+        if t.hasSuffix("\n") { t.removeLast() }
+        return t.split(separator: "\n").last.map(String.init)?
+            .trimmingCharacters(in: .whitespaces) ?? "error"
+    }
+
+    /// Parse the tab-separated op rows emitted by `__serialize`.
+    private static func parseOps(_ s: String) -> [DrawOp] {
+        s.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
+            let f = line.split(separator: "\t", maxSplits: 8, omittingEmptySubsequences: false)
+            guard f.count >= 8 else { return nil }
+            func num(_ i: Int) -> Double { Double(f[i]) ?? 0 }
+            return DrawOp(
+                op: String(f[0]),
+                x: num(1), y: num(2), a: num(3), b: num(4), c: num(5), d: num(6),
+                color: UInt32(f[7]) ?? 0xFFFFFF,
+                text: f.count >= 9 ? String(f[8]) : "")
+        }
+    }
+
     // C writer trampoline: ctx is an unretained Sink pointer.
     private static let writer: @convention(c) (UnsafePointer<CChar>?, Int, UnsafeMutableRawPointer?) -> Void = { ptr, len, ctx in
         guard let ptr, let ctx, len > 0 else { return }
