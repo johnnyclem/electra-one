@@ -194,7 +194,11 @@ enum AIClient {
                     // Coalesce UI pushes to roughly every ~24 chars to keep highlighting smooth.
                     if full.count - lastPushed >= 24 {
                         lastPushed = full.count
-                        await onText(full)
+                        // Strip any in-progress <think>…</think> so the editor only
+                        // ever shows real answer text — reasoning models that embed
+                        // their chain-of-thought in `content` would otherwise flood
+                        // the code view with prose while still "thinking".
+                        await onText(stripThink(full))
                     }
                 }
             } else if let err = obj["error"] as? [String: Any] {

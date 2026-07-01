@@ -19,11 +19,17 @@ struct LuaCodeView: NSViewRepresentable {
         textView.backgroundColor = LuaTheme.background
         textView.insertionPointColor = .white
         textView.textColor = LuaTheme.plain
-        // macOS 14+ defaults `usesAdaptiveColorMappingForDarkAppearance` to true:
-        // under the app's dark appearance it remaps our custom colors so the dark
-        // background is lightened to ~our text color, making the light text vanish
-        // (light-on-light). That was the "line numbers show but text is invisible"
-        // bug. We manage colors ourselves, so opt out.
+        // We paint our own dark theme. Pin the editor to a fixed dark appearance
+        // and opt out of adaptive color mapping so AppKit never "helpfully"
+        // remaps our colors. macOS 14+ defaults `usesAdaptiveColorMappingFor-
+        // DarkAppearance` to true: under a dark window it lightens the dark
+        // background toward our light text, so the text vanishes (light-on-light).
+        // Disabling the flag alone wasn't enough in a live dark window on newer
+        // macOS — pinning the appearance is what makes streamed text reliably
+        // visible. This was the "line numbers show but the code is invisible" bug.
+        let darkAppearance = NSAppearance(named: .darkAqua)
+        textView.appearance = darkAppearance
+        scroll.appearance = darkAppearance
         if #available(macOS 14.0, *) {
             textView.usesAdaptiveColorMappingForDarkAppearance = false
         }
