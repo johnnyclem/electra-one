@@ -121,6 +121,9 @@ static const char *PREAMBLE =
 "controls = setmetatable({\n"
 "  get = function(id) if not __ctl_cache[id] then __ctl_cache[id]=__makeControl(id) end return __ctl_cache[id] end,\n"
 "}, { __index = function() return function() end end })\n"
+/* concrete `preset` so `function preset.onReady()` is retrievable — lets the
+ * in-app renderer register paint callbacks the same way the device does. */
+"preset = setmetatable({}, { __index = function() return function() end end })\n"
 /* serialize + render one control's paint callback at a given size/value */
 "function __serialize(ops)\n"
 "  local t = {}\n"
@@ -135,6 +138,8 @@ static const char *PREAMBLE =
 "  __draw = {}\n"
 "  __cur_color = 0xFFFFFF\n"
 "  __render_val = math.floor((frac or 0)*127 + 0.5)\n"
+"  if rawget(preset, 'onLoad') then pcall(preset.onLoad) end\n"
+"  if rawget(preset, 'onReady') then pcall(preset.onReady) end\n"
 "  local ctl = controls.get(id)\n"
 "  ctl.__setbounds({0,0,w,h})\n"
 "  local cb = __paint_cbs[id]\n"

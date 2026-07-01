@@ -354,13 +354,15 @@ public struct PresetDocument {
         if let v = kind.rawVariant { control["variant"] = v }
 
         if kind == .custom {
-            // A Custom control spans two columns to give the paint script room,
-            // and keeps one value so a pot can drive its rendering.
+            // A Custom control spans two columns to give the paint script room.
+            // Its value is a *virtual* parameter (no MIDI mapping) — this mirrors
+            // the working custom-control format the Electra One editor produces;
+            // a `cc7` value here leaves the control non-custom and blank on device.
             control["bounds"] = [b.x, b.y, b.w + SlotGeometry.pitchX, b.h].map { Int($0.rounded()) }
             control["inputs"] = [["potId": pot, "valueId": "value"]]
             control["values"] = [[
                 "id": "value", "defaultValue": 0,
-                "message": ["type": "cc7", "min": 0, "max": 127, "parameterNumber": newId, "deviceId": dev],
+                "message": ["type": "virtual", "parameterNumber": newId, "deviceId": dev],
             ]]
         } else if kind == .adsr {
             // ADSR spans two columns and carries four CC values.
@@ -403,21 +405,28 @@ public struct PresetDocument {
         let fn = paintFunctionName(forControlId: id)
         let hex = "0x" + colorHex.uppercased()
         return """
-        -- Custom control \(id): draws its own graphics. Edit freely — the canvas
-        -- updates as you type. `display:getValue()` is the control's 0..127 value.
+        -- Custom control \(id): draws its own graphics via a paint callback.
+        -- Coordinates are LOCAL to the control (0,0 = its top-left corner).
+        -- Edit freely — the in-app canvas updates as you type.
         function \(fn)(display)
           local b = display:getBounds()
           local w, h = b[WIDTH], b[HEIGHT]
-          local v = display:getValue() / 127
-          graphics.setColor(0x1A1A20)
+          graphics.setColor(0x1A1A20)          -- background
           graphics.fillRect(0, 0, w, h)
-          graphics.setColor(\(hex))
-          graphics.fillRect(0, h - h * v, w, h * v)
+          graphics.setColor(\(hex))            -- filled body
+          graphics.fillRoundRect(4, 4, w - 8, h - 8, 6)
           graphics.setColor(WHITE)
-          graphics.print(0, h / 2 - 6, tostring(math.floor(v * 127)), w, CENTER)
+          graphics.print(0, h / 2 - 6, "CUSTOM", w, CENTER)
         end
 
-        controls.get(\(id)):setPaintCallback(\(fn))
+        -- Register the paint callback in preset.onLoad and force the first paint
+        -- with repaint() — this matches the format the Electra One editor produces
+        -- for custom controls (registering at top level alone draws nothing).
+        function preset.onLoad()
+          local c = controls.get(\(id))
+          c:setPaintCallback(\(fn))
+          c:repaint()
+        end
         """
     }
 
