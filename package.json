@@ -7,7 +7,9 @@
   },
   "scripts": {
     "start": "node ./bin/e1.js tui",
-    "tui": "node ./bin/e1.js tui"
+    "tui": "node ./bin/e1.js tui",
+    "test": "node --test \"test/**/*.test.js\"",
+    "smoke": "node tui/smoke.test.mjs"
   },
   "type": "commonjs",
   "engines": {

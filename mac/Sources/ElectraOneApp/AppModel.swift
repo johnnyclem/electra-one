@@ -46,6 +46,16 @@ final class AppModel: ObservableObject {
     @Published var luaConsole: String = ""
     private let lua = LuaEngine()
 
+    // ── Script library ────────────────────────────────────────────────────────
+    // A persistent collection of every Lua script the user writes, generates, or
+    // imports — independent of any one preset. Lives on disk (see ScriptLibrary).
+    private let scriptLibrary = ScriptLibrary()
+    @Published var libraryScripts: [LibraryScript] = []
+    @Published var libraryPresented = false
+    /// The library entry currently loaded in the editor, if any — lets "Save"
+    /// update in place rather than always creating a new entry.
+    @Published var activeLibraryScriptId: UUID? = nil
+
     // Built-in simulator (Run)
     @Published var simulatorPresented = false
     @Published var simBottomText: String = ""
@@ -92,6 +102,13 @@ final class AppModel: ObservableObject {
 
     init() {
         slots = (0..<slotsPerBank).map { SlotState(slot: $0, status: .unknown) }
+        // Seed a first-run library with the built-in example so it's never empty,
+        // then surface whatever's on disk.
+        if scriptLibrary.scripts.isEmpty {
+            scriptLibrary.add(LibraryScript(name: "Hello World (example)",
+                                            source: AppModel.sampleScript, origin: .sample))
+        }
+        libraryScripts = scriptLibrary.scripts
     }
 
     var isConnected: Bool { if case .ready = connection { return true }; return false }
@@ -220,6 +237,8 @@ final class AppModel: ObservableObject {
         redoStack.removeAll()
         refreshUndoFlags()
         if let l = doc.lua, !l.isEmpty { luaSource = l }
+        // The editor now reflects this preset's Lua, not a library entry.
+        activeLibraryScriptId = nil
     }
 
     // ── Lua editor actions ───────────────────────────────────────────────────
@@ -258,7 +277,7 @@ final class AppModel: ObservableObject {
         }
         appendConsole("▶ Run — launching simulator…")
         let result = lua.simulate(luaSource)
-        if !result.output.isEmpty { appendConsole(result.output, raw: true) }
+        if !result.output.isEmpty { appendConsole(result.output) }
         if let err = result.error {
             appendConsole("✗ \(err)")
         } else {
@@ -270,6 +289,68 @@ final class AppModel: ObservableObject {
 
     func clearConsole() { luaConsole = "" }
 
+    // ── Script library actions ────────────────────────────────────────────────
+
+    private func refreshLibrary() { libraryScripts = scriptLibrary.scripts }
+
+    var canSaveToLibrary: Bool {
+        !luaSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Save the current editor script into the library. If it's already backed by
+    /// a library entry, update that entry in place; otherwise create a new one
+    /// (named after the open preset, or "Untitled Script").
+    func saveCurrentToLibrary() {
+        guard canSaveToLibrary else { message = "Nothing to save — the editor is empty."; return }
+        if let id = activeLibraryScriptId,
+           scriptLibrary.scripts.contains(where: { $0.id == id }) {
+            scriptLibrary.updateSource(id: id, source: luaSource)
+            refreshLibrary()
+            let name = scriptLibrary.scripts.first { $0.id == id }?.name ?? "script"
+            message = "Updated “\(name)” in the library."
+        } else {
+            let base = document?.name.isEmpty == false ? document!.name : "Untitled Script"
+            let script = captureToLibrary(source: luaSource, name: base, origin: .created)
+            activeLibraryScriptId = script?.id
+            message = script.map { "Saved “\($0.name)” to the library." } ?? "Nothing to save."
+        }
+    }
+
+    /// Add a script to the library, skipping exact-duplicate sources so auto-capture
+    /// (AI generation, imports) doesn't pile up copies. Returns the stored entry.
+    @discardableResult
+    func captureToLibrary(source: String, name: String, origin: LibraryScript.Origin) -> LibraryScript? {
+        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !scriptLibrary.contains(source: source) else { return nil }
+        let script = scriptLibrary.add(LibraryScript(
+            name: scriptLibrary.uniqueName(basedOn: name), source: source, origin: origin))
+        refreshLibrary()
+        return script
+    }
+
+    /// Load a library script into the editor (attaching it to the open preset's
+    /// Lua so Save / Push carry it along).
+    func loadFromLibrary(_ script: LibraryScript) {
+        setLuaSource(script.source)
+        activeLibraryScriptId = script.id
+        editorMode = .script
+        libraryPresented = false
+        message = "Loaded “\(script.name)” into the editor."
+    }
+
+    func renameLibraryScript(_ id: UUID, to name: String) {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        scriptLibrary.rename(id: id, to: clean)
+        refreshLibrary()
+    }
+
+    func deleteLibraryScript(_ id: UUID) {
+        scriptLibrary.remove(id: id)
+        if activeLibraryScriptId == id { activeLibraryScriptId = nil }
+        refreshLibrary()
+    }
+
     func importLua() {
         let panel = NSOpenPanel()
         var types: [UTType] = []
@@ -279,8 +360,14 @@ final class AppModel: ObservableObject {
         panel.allowsOtherFileTypes = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            setLuaSource(try String(contentsOf: url, encoding: .utf8))
-            message = "Imported \(url.lastPathComponent)."
+            let source = try String(contentsOf: url, encoding: .utf8)
+            setLuaSource(source)
+            let base = url.deletingPathExtension().lastPathComponent
+            let saved = captureToLibrary(source: source, name: base, origin: .imported)
+            activeLibraryScriptId = saved?.id
+            message = saved != nil
+                ? "Imported \(url.lastPathComponent) → added to library."
+                : "Imported \(url.lastPathComponent)."
         } catch {
             message = "Error: \(error.localizedDescription)"
         }
@@ -297,9 +384,9 @@ final class AppModel: ObservableObject {
         } catch { message = "Save failed: \(error.localizedDescription)" }
     }
 
-    private func appendConsole(_ text: String, raw: Bool = false) {
+    private func appendConsole(_ text: String) {
         if !luaConsole.isEmpty { luaConsole += "\n" }
-        luaConsole += raw ? text : text
+        luaConsole += text
     }
 
     // ── AI generation ────────────────────────────────────────────────────────
@@ -354,7 +441,11 @@ final class AppModel: ObservableObject {
                     })
                 // Commit the final (fence-stripped) source to the document + undo/dirty.
                 setLuaSource(lua)
-                appendConsole("✓ Script generated (\(lua.split(separator: "\n").count) lines). Review, Build, and Run.")
+                // Auto-capture the generation into the library (named from the prompt).
+                let saved = captureToLibrary(source: lua, name: Self.libraryName(fromPrompt: prompt), origin: .generated)
+                activeLibraryScriptId = saved?.id
+                let libNote = saved != nil ? " Saved to library as “\(saved!.name)”." : ""
+                appendConsole("✓ Script generated (\(lua.split(separator: "\n").count) lines). Review, Build, and Run.\(libNote)")
                 aiPrompt = ""
             } catch {
                 let msg = (error as? AIClient.AIError)?.description ?? error.localizedDescription
@@ -363,6 +454,17 @@ final class AppModel: ObservableObject {
             }
             aiBusy = false
         }
+    }
+
+    /// Turn a free-text AI prompt into a short, title-ish library name.
+    static func libraryName(fromPrompt prompt: String) -> String {
+        let words = prompt
+            .replacingOccurrences(of: "\n", with: " ")
+            .split(separator: " ")
+            .prefix(6)
+            .joined(separator: " ")
+        let trimmed = words.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? "AI Script" : trimmed
     }
 
     func newDocument() {
@@ -629,7 +731,7 @@ final class AppModel: ObservableObject {
         appendConsole("▶ Run \(name) …")
         let combined = luaSource + "\n\n\(fn)(nil, 127)\n"
         let result = lua.simulate(combined)
-        if !result.output.isEmpty { appendConsole(result.output, raw: true) }
+        if !result.output.isEmpty { appendConsole(result.output) }
         if let err = result.error {
             appendConsole("✗ \(err)")
         } else {

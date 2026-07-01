@@ -29,6 +29,12 @@ let package = Package(
             name: "e1probe",
             dependencies: ["ElectraKit", "LuaKit"]
         ),
+        // Unit tests for the pure/offline layers (protocol, geometry, document
+        // model, project import, Lua engine). No hardware required.
+        .testTarget(
+            name: "ElectraKitTests",
+            dependencies: ["ElectraKit", "LuaKit"]
+        ),
     ],
     swiftLanguageModes: [.v5]
 )

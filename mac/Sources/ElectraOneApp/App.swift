@@ -74,6 +74,12 @@ struct ElectraOneApp: App {
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(model.editorMode != .script)
                 Divider()
+                Button("Script Library…") { model.editorMode = .script; model.libraryPresented = true }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
+                Button("Save to Library") { model.saveCurrentToLibrary() }
+                    .keyboardShortcut("s", modifiers: [.command, .option])
+                    .disabled(!model.canSaveToLibrary)
+                Divider()
                 Button("Import Lua…") { model.importLua() }
                 Button("Export Lua…") { model.exportLua() }
             }

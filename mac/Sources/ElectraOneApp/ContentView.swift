@@ -921,6 +921,7 @@ private struct ScriptEditor: View {
         }
         .background(ElectraTheme.background)
         .sheet(isPresented: $model.aiSettingsPresented) { AISettingsSheet() }
+        .sheet(isPresented: $model.libraryPresented) { ScriptLibrarySheet() }
     }
 
     private var toolbar: some View {
@@ -931,6 +932,10 @@ private struct ScriptEditor: View {
             Divider().frame(height: 16)
             Button { model.aiBarPresented.toggle() } label: { Label("AI", systemImage: "sparkles") }
                 .tint(.purple)
+            Divider().frame(height: 16)
+            Button { model.libraryPresented = true } label: { Label("Library", systemImage: "books.vertical") }
+            Button { model.saveCurrentToLibrary() } label: { Label("Save to Library", systemImage: "text.badge.plus") }
+                .disabled(!model.canSaveToLibrary)
             Divider().frame(height: 16)
             Button { model.importLua() } label: { Label("Import…", systemImage: "square.and.arrow.down") }
             Button { model.exportLua() } label: { Label("Export…", systemImage: "square.and.arrow.up") }
@@ -976,6 +981,148 @@ private struct ScriptEditor: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(Color.purple.opacity(0.08))
+    }
+}
+
+// MARK: - Script library
+
+/// Browsable list of every saved Lua script. Load one into the editor, rename,
+/// or delete. Populated by manual "Save to Library", AI generation, and imports.
+private struct ScriptLibrarySheet: View {
+    @EnvironmentObject var model: AppModel
+    @State private var search = ""
+    @State private var renaming: UUID?
+    @State private var renameText = ""
+    @State private var selection: UUID?
+
+    private var filtered: [LibraryScript] {
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return model.libraryScripts }
+        return model.libraryScripts.filter {
+            $0.name.lowercased().contains(q) || $0.source.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Label("Script Library", systemImage: "books.vertical")
+                    .font(ElectraTheme.headlineFont)
+                Spacer()
+                Text("\(model.libraryScripts.count) script\(model.libraryScripts.count == 1 ? "" : "s")")
+                    .font(.caption).foregroundStyle(ElectraTheme.textTertiary)
+            }
+            .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
+
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(ElectraTheme.textTertiary)
+                TextField("Search scripts", text: $search).textFieldStyle(.plain)
+            }
+            .padding(8)
+            .background(ElectraTheme.surfaceSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, 16)
+
+            Divider().padding(.top, 10)
+
+            if filtered.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "tray").font(.system(size: 28)).foregroundStyle(ElectraTheme.textTertiary)
+                    Text(model.libraryScripts.isEmpty
+                         ? "No saved scripts yet.\nGenerate, import, or “Save to Library” to build your collection."
+                         : "No scripts match “\(search)”.")
+                        .font(.callout).multilineTextAlignment(.center)
+                        .foregroundStyle(ElectraTheme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
+            } else {
+                List(selection: $selection) {
+                    ForEach(filtered) { script in
+                        row(script)
+                            .tag(script.id)
+                            .listRowBackground(Color.clear)
+                    }
+                }
+                .listStyle(.inset)
+                .scrollContentBackground(.hidden)
+            }
+
+            Divider()
+            HStack {
+                Button("Save Current Script to Library") { model.saveCurrentToLibrary() }
+                    .disabled(!model.canSaveToLibrary)
+                Spacer()
+                Button("Load") { if let s = selected { model.loadFromLibrary(s) } }
+                    .buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
+                    .disabled(selected == nil)
+                Button("Close") { model.libraryPresented = false }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(16)
+        }
+        .frame(width: 560, height: 460)
+        .background(ElectraTheme.background)
+    }
+
+    private var selected: LibraryScript? {
+        model.libraryScripts.first { $0.id == selection }
+    }
+
+    @ViewBuilder private func row(_ script: LibraryScript) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                if renaming == script.id {
+                    TextField("Name", text: $renameText, onCommit: { commitRename(script.id) })
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 260)
+                } else {
+                    Text(script.name).font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white)
+                }
+                HStack(spacing: 6) {
+                    originBadge(script.origin)
+                    Text("\(script.lineCount) line\(script.lineCount == 1 ? "" : "s")")
+                    Text("·")
+                    Text(script.updatedAt, style: .date)
+                    if script.id == model.activeLibraryScriptId {
+                        Text("· in editor").foregroundStyle(ElectraTheme.accent)
+                    }
+                }
+                .font(.caption2).foregroundStyle(ElectraTheme.textTertiary)
+            }
+            Spacer()
+            if renaming == script.id {
+                Button("Done") { commitRename(script.id) }.controlSize(.small)
+            } else {
+                Menu {
+                    Button("Load into Editor") { model.loadFromLibrary(script) }
+                    Button("Rename…") { renaming = script.id; renameText = script.name }
+                    Divider()
+                    Button("Delete", role: .destructive) { model.deleteLibraryScript(script.id) }
+                } label: {
+                    Image(systemName: "ellipsis.circle").foregroundStyle(ElectraTheme.textSecondary)
+                }
+                .menuStyle(.borderlessButton).frame(width: 28)
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { model.loadFromLibrary(script) }
+    }
+
+    private func originBadge(_ origin: LibraryScript.Origin) -> some View {
+        Text(origin.label.uppercased())
+            .font(.system(size: 9, weight: .semibold))
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(ElectraTheme.surfaceSecondary)
+            .clipShape(Capsule())
+            .foregroundStyle(ElectraTheme.textSecondary)
+    }
+
+    private func commitRename(_ id: UUID) {
+        model.renameLibraryScript(id, to: renameText)
+        renaming = nil
     }
 }
 
