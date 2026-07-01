@@ -38,7 +38,7 @@ struct LuaCodeView: NSViewRepresentable {
         textView.font = LuaTheme.font
         textView.drawsBackground = true
         textView.backgroundColor = LuaTheme.background
-        textView.insertionPointColor = .white
+        textView.insertionPointColor = LuaTheme.plain
         textView.textColor = LuaTheme.plain
         // Defeat dark-appearance "adaptive color mapping", which darkens our light
         // text toward the dark background until the code disappears. The opt-out
@@ -107,16 +107,19 @@ struct LuaCodeView: NSViewRepresentable {
 // MARK: - Theme
 
 enum LuaTheme {
+    // Light editor theme: dark ink on a near-white page, with syntax colors
+    // chosen to stay legible against the light background. The editor is pinned
+    // to the .aqua (light) appearance in makeNSView, so these render as set.
     static let font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
-    static let background = NSColor(calibratedRed: 0.07, green: 0.07, blue: 0.08, alpha: 1)
-    static let plain = NSColor.systemRed
-    static let comment = NSColor(calibratedRed: 0.45, green: 0.55, blue: 0.45, alpha: 1)
-    static let string = NSColor(calibratedRed: 0.95, green: 0.66, blue: 0.42, alpha: 1)
-    static let number = NSColor(calibratedRed: 0.55, green: 0.80, blue: 0.95, alpha: 1)
-    static let keyword = NSColor(calibratedRed: 0.93, green: 0.45, blue: 0.62, alpha: 1)
-    static let api = NSColor(calibratedRed: 0.30, green: 0.78, blue: 0.72, alpha: 1)
-    static let funcName = NSColor(calibratedRed: 0.96, green: 0.80, blue: 0.35, alpha: 1)
-    static let gutter = NSColor(calibratedWhite: 0.35, alpha: 1)
+    static let background = NSColor(calibratedRed: 0.99, green: 0.99, blue: 0.99, alpha: 1)
+    static let plain = NSColor(calibratedRed: 0.12, green: 0.12, blue: 0.14, alpha: 1)
+    static let comment = NSColor(calibratedRed: 0.40, green: 0.52, blue: 0.40, alpha: 1)
+    static let string = NSColor(calibratedRed: 0.72, green: 0.30, blue: 0.16, alpha: 1)
+    static let number = NSColor(calibratedRed: 0.10, green: 0.42, blue: 0.72, alpha: 1)
+    static let keyword = NSColor(calibratedRed: 0.68, green: 0.18, blue: 0.42, alpha: 1)
+    static let api = NSColor(calibratedRed: 0.08, green: 0.52, blue: 0.48, alpha: 1)
+    static let funcName = NSColor(calibratedRed: 0.55, green: 0.40, blue: 0.05, alpha: 1)
+    static let gutter = NSColor(calibratedWhite: 0.60, alpha: 1)
 }
 
 // MARK: - Highlighter
