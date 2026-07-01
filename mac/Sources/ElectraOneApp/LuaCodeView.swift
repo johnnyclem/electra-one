@@ -9,27 +9,46 @@ struct LuaCodeView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSTextView.scrollableTextView()
-        guard let textView = scroll.documentView as? NSTextView else { return scroll }
+        // Build the text stack on TextKit 1 explicitly. On macOS 26,
+        // `NSTextView.scrollableTextView()` hands back a TextKit 2 view; once we
+        // attach a custom NSRulerView (line numbers) and touch its layout
+        // manager, that view stops drawing glyphs entirely — the gutter shows
+        // line numbers but the code is invisible, at any text color. Creating an
+        // NSLayoutManager and wiring the storage/container/text view by hand pins
+        // the whole thing to TextKit 1, which renders reliably.
+        let textStorage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        textStorage.addLayoutManager(layoutManager)
+        let container = NSTextContainer(
+            containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        layoutManager.addTextContainer(container)
+
+        let textView = NSTextView(frame: .zero, textContainer: container)
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                  height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
 
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.allowsUndo = true
         textView.font = LuaTheme.font
+        textView.drawsBackground = true
         textView.backgroundColor = LuaTheme.background
         textView.insertionPointColor = .white
         textView.textColor = LuaTheme.plain
-        // We paint our own dark theme. Pin the editor to a fixed dark appearance
-        // and opt out of adaptive color mapping so AppKit never "helpfully"
-        // remaps our colors. macOS 14+ defaults `usesAdaptiveColorMappingFor-
-        // DarkAppearance` to true: under a dark window it lightens the dark
-        // background toward our light text, so the text vanishes (light-on-light).
-        // Disabling the flag alone wasn't enough in a live dark window on newer
-        // macOS — pinning the appearance is what makes streamed text reliably
-        // visible. This was the "line numbers show but the code is invisible" bug.
-        let darkAppearance = NSAppearance(named: .darkAqua)
-        textView.appearance = darkAppearance
-        scroll.appearance = darkAppearance
+        // Defeat dark-appearance "adaptive color mapping", which darkens our light
+        // text toward the dark background until the code disappears. The opt-out
+        // flag is unreliable on recent macOS, so we also pin the editor to the
+        // LIGHT appearance — that mapping only runs in dark appearance, so under
+        // aqua our explicit colors render exactly as set. (The TextKit-1 stack
+        // above is what makes the glyphs lay out and draw in the first place; this
+        // is what makes them the right color.)
+        let lightAppearance = NSAppearance(named: .aqua)
+        textView.appearance = lightAppearance
         if #available(macOS 14.0, *) {
             textView.usesAdaptiveColorMappingForDarkAppearance = false
         }
@@ -42,9 +61,14 @@ struct LuaCodeView: NSViewRepresentable {
         textView.textContainerInset = NSSize(width: 6, height: 8)
         textView.string = text
 
+        let scroll = NSScrollView()
+        scroll.documentView = textView
+        scroll.appearance = lightAppearance
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = true
         scroll.backgroundColor = LuaTheme.background
         scroll.hasVerticalScroller = true
-        scroll.hasHorizontalRuler = false
+        scroll.hasHorizontalScroller = false
         scroll.hasVerticalRuler = true
         scroll.rulersVisible = true
         let ruler = LineNumberRuler(textView: textView)
@@ -85,7 +109,7 @@ struct LuaCodeView: NSViewRepresentable {
 enum LuaTheme {
     static let font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
     static let background = NSColor(calibratedRed: 0.07, green: 0.07, blue: 0.08, alpha: 1)
-    static let plain = NSColor(calibratedWhite: 0.92, alpha: 1)
+    static let plain = NSColor.systemRed
     static let comment = NSColor(calibratedRed: 0.45, green: 0.55, blue: 0.45, alpha: 1)
     static let string = NSColor(calibratedRed: 0.95, green: 0.66, blue: 0.42, alpha: 1)
     static let number = NSColor(calibratedRed: 0.55, green: 0.80, blue: 0.95, alpha: 1)
