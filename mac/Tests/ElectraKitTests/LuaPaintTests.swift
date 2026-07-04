@@ -35,6 +35,22 @@ import Testing
         // never crashes.
         let r = lua.paint("print('nothing')", controlId: 9, width: 10, height: 10, fraction: 0)
         #expect(r.ops.isEmpty)
+        #expect((r.error ?? "").contains("no paint callback"))
+    }
+
+    @Test func erroringCallbackSurfacesRealError() {
+        // A callback that throws must report its message — not be silently
+        // swallowed as an empty canvas or misreported as "no callback".
+        let s = """
+        controls.get(3):setPaintCallback(function(o)
+          error('kaboom')
+        end)
+        """
+        let r = lua.paint(s, controlId: 3, width: 10, height: 10, fraction: 0)
+        #expect(!r.ok)
+        #expect((r.error ?? "").contains("kaboom"))
+        #expect(!(r.error ?? "").contains("no paint callback"))
+        #expect(r.ops.isEmpty)
     }
 
     @Test func valueFractionReachesCallback() {

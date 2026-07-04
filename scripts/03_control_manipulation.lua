@@ -140,14 +140,25 @@ function setControlColor(controlId, color)
     end
 end
 
--- Example: Flash a control red briefly (for alerts)
+-- Example: Flash a control red briefly (for alerts).
+-- There is no blocking delay API, so the restore is scheduled with the timer.
+local flashRestore = nil
+
 function flashControl(controlId)
     local ctrl = controls.get(controlId)
     if ctrl then
-        local originalColor = ctrl:getColor()
+        flashRestore = { ctrl = ctrl, color = ctrl:getColor() }
         ctrl:setColor(0xFF0000)
-        helpers.delay(200)
-        ctrl:setColor(originalColor)
+        timer.setPeriod(200)
+        timer.enable()
+    end
+end
+
+function timer.onTick()
+    timer.disable()
+    if flashRestore then
+        flashRestore.ctrl:setColor(flashRestore.color)
+        flashRestore = nil
     end
 end
 
@@ -160,30 +171,8 @@ function goToPage(pageId)
     print("Switched to page " .. pageId)
 end
 
--- Get info about current page
-function getCurrentPageInfo()
-    local page = pages.getActive()
-    print("Current page: " .. page:getId() .. " - " .. page:getName())
-end
-
--- Rename a page
-function renamePage(pageId, newName)
-    local page = pages.get(pageId)
-    if page then
-        page:setName(newName)
-    end
-end
-
--- Hide a page (won't show in page selector)
-function hidePage(pageId, hidden)
-    local page = pages.get(pageId)
-    if page then
-        page:setHidden(hidden)
-    end
-end
-
 -- Page change callback
-function pages.onChange(newPageId, oldPageId)
+function events.onPageChange(newPageId, oldPageId)
     print(string.format("Page changed: %d -> %d", oldPageId, newPageId))
     info.setText("Page " .. newPageId)
 end

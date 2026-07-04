@@ -105,6 +105,38 @@ import Foundation
         #expect(c.kind == .fader)
     }
 
+    @Test func placementNeverOverlapsAfterDeletion() {
+        var doc = PresetDocument.newPreset()
+        let a = doc.addControl(pageId: 1)   // slot 1
+        _ = doc.addControl(pageId: 1)       // slot 2
+        _ = doc.addControl(pageId: 1)       // slot 3
+        doc.removeControl(id: a)            // slot 1 frees up
+        let d = doc.addControl(pageId: 1)   // must reuse slot 1, not land on slot 3
+
+        let added = doc.control(id: d)!
+        #expect([added.x, added.y] == [20, 36])   // the freed origin slot
+        // No two controls share an origin.
+        let origins = doc.allControls().map { [$0.x, $0.y] }
+        #expect(Set(origins.map { "\($0)" }).count == origins.count)
+    }
+
+    @Test func placementSkipsColumnsSpannedByWideControls() {
+        var doc = PresetDocument.newPreset()
+        _ = doc.addControl(kind: .custom, pageId: 1)  // spans slots 1+2
+        let id = doc.addControl(pageId: 1)
+        let c = doc.control(id: id)!
+        // The fader must land in slot 3, past the 2-column custom control.
+        #expect([c.x, c.y] == [20 + 2 * 196, 36])
+    }
+
+    @Test func newControlParameterIsLowestUnusedCC() {
+        var doc = makeDoc()   // fixture already uses CC 74 and 71
+        let id = doc.addControl(pageId: 1)
+        let c = doc.control(id: id)!
+        #expect(c.parameterNumber == 1)          // lowest unused, not the id
+        #expect(c.name == "CC #1")               // label matches the parameter
+    }
+
     @Test func addADSRBuildsFourValues() {
         var doc = makeDoc()
         let id = doc.addControl(kind: .adsr, pageId: 1)

@@ -10,24 +10,27 @@ import Foundation
 /// and device upload work uniformly.
 extension PresetDocument {
 
+    /// Parse the file text into a JSON object (nil if it isn't one).
+    private static func parseObject(_ text: String) -> [String: Any]? {
+        guard let data = text.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    /// Project detection on already-parsed JSON — shared by `load`/`isProject`
+    /// so neither has to parse twice.
+    private static func looksLikeProject(_ obj: [String: Any]) -> Bool {
+        obj["tiles"] != nil || obj["schemaVersion"] != nil
+    }
+
     /// Load from a file's text, auto-detecting project vs preset.
     public static func load(fileText text: String) -> PresetDocument? {
-        guard let data = text.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-
-        if obj["tiles"] != nil || obj["schemaVersion"] != nil {
-            return importProject(obj)
-        }
-        return PresetDocument(root: obj)
+        guard let obj = parseObject(text) else { return nil }
+        return looksLikeProject(obj) ? importProject(obj) : PresetDocument(root: obj)
     }
 
     /// True if the JSON text looks like an Electra project (.eproj).
     public static func isProject(_ text: String) -> Bool {
-        guard let data = text.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return false }
-        return obj["tiles"] != nil || obj["schemaVersion"] != nil
+        parseObject(text).map(looksLikeProject) ?? false
     }
 
     // ── Project → preset conversion ─────────────────────────────────────────
@@ -59,11 +62,20 @@ extension PresetDocument {
         let tiles = proj["tiles"] as? [[String: Any]] ?? []
         var controls: [[String: Any]] = []
         var groups: [[String: Any]] = []
+        // Fallback ids for tiles without an explicit `reference` are allocated
+        // above the highest explicit one so they can never collide with it.
+        var nextFallbackId = tiles.compactMap { $0["reference"] as? Int }.max() ?? 0
         for (i, tile) in tiles.enumerated() {
             let slotId = tile["slotId"] as? Int ?? i
             let (pageIndex, deviceRow, col) = decodeSlot(slotId)
             let pid = pageId(forIndex: pageIndex)
-            let refId = tile["reference"] as? Int ?? (i + 1)
+            let refId: Int
+            if let r = tile["reference"] as? Int {
+                refId = r
+            } else {
+                nextFallbackId += 1
+                refId = nextFallbackId
+            }
             let type = tile["type"] as? String ?? "fader"
             // A device cell on the collapsed 6×6 grid (1…36), reused for geometry.
             let cellSlot = deviceRow * SlotGeometry.columns + col + 1
@@ -74,7 +86,9 @@ extension PresetDocument {
             // any other control type. Emit them as `groups` instead.
             if type == "label" {
                 let span = max(1, tile["span"] as? Int ?? 1)
-                let width = span * Int(SlotGeometry.slotWidth.rounded())
+                // Spanning adds whole column pitches (slot width + gap), not
+                // bare slot widths — matches how addControl widens controls.
+                let width = Int((SlotGeometry.slotWidth + Double(span - 1) * SlotGeometry.pitchX).rounded())
                 groups.append([
                     "id": refId,
                     "pageId": pid,
@@ -108,7 +122,7 @@ extension PresetDocument {
 
         let devicesIn = proj["devices"] as? [[String: Any]] ?? []
         let devices: [[String: Any]] = devicesIn.isEmpty
-            ? [["id": 1, "name": "MIDI Device 1", "port": 1, "channel": 1]]
+            ? [PresetDocument.defaultDevice]
             : devicesIn.map { d in
                 [
                     "id": d["id"] ?? 1,
@@ -121,7 +135,7 @@ extension PresetDocument {
         let root: [String: Any] = [
             "version": 2,
             "name": proj["name"] as? String ?? "Imported Preset",
-            "projectId": proj["id"] as? String ?? PresetDocument.newPreset().projectId ?? "imported",
+            "projectId": proj["id"] as? String ?? PresetDocument.makeProjectId(),
             "pages": pagesIn.map { ["id": $0["id"] ?? 1, "name": $0["name"] ?? "Page"] },
             "devices": devices,
             "groups": groups,

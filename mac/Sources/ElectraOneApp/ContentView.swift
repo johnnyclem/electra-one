@@ -30,9 +30,14 @@ extension Color {
         if s.count == 3 { s = s.map { "\($0)\($0)" }.joined() }
         var v: UInt64 = 0
         Scanner(string: s).scanHexInt64(&v)
-        self = Color(red: Double((v >> 16) & 0xff) / 255,
-                     green: Double((v >> 8) & 0xff) / 255,
-                     blue: Double(v & 0xff) / 255)
+        self.init(rgb: UInt32(truncatingIfNeeded: v))
+    }
+
+    /// Build a Color from a 24-bit RGB integer (as Electra `graphics` uses).
+    init(rgb: UInt32) {
+        self = Color(red: Double((rgb >> 16) & 0xff) / 255,
+                     green: Double((rgb >> 8) & 0xff) / 255,
+                     blue: Double(rgb & 0xff) / 255)
     }
 }
 
@@ -590,15 +595,6 @@ private struct RichControl: View {
     private var valueLabel: String {
         if let p = control.parameterNumber, let t = control.messageType { return "\(t) \(p)" }
         return control.messageType ?? ""
-    }
-}
-
-extension Color {
-    /// Build a Color from a 24-bit RGB integer (as Electra `graphics` uses).
-    init(rgb: UInt32) {
-        self = Color(red: Double((rgb >> 16) & 0xff) / 255,
-                     green: Double((rgb >> 8) & 0xff) / 255,
-                     blue: Double(rgb & 0xff) / 255)
     }
 }
 
@@ -1303,7 +1299,9 @@ private struct AISettingsSheet: View {
                     availableModels = ids
                     loadingModels = false
                     if ids.isEmpty { modelsError = "No models reported by the endpoint." }
-                    else if !ids.contains(model.aiModel), let first = ids.first { model.aiModel = first }
+                    // Only auto-pick when nothing is set — a hand-typed model
+                    // (e.g. one the endpoint doesn't list) must survive Refresh.
+                    else if model.aiModel.isEmpty, let first = ids.first { model.aiModel = first }
                 }
             } catch {
                 await MainActor.run {
@@ -1484,7 +1482,9 @@ private struct SimulatorSheet: View {
                     Color.black
                     ForEach(currentControls) { control in
                         RichControl(control: control, scale: scale, selected: false, liveOffset: .zero,
-                                    onSelect: {}, onDragChanged: { _ in }, onDragEnded: { _ in })
+                                    onSelect: {},
+                                    onRun: { model.runScriptControl(id: control.id) },
+                                    onDragChanged: { _ in }, onDragEnded: { _ in })
                     }
                     if currentControls.isEmpty {
                         Text(model.document == nil
@@ -1512,30 +1512,8 @@ private struct SimulatorSheet: View {
     }
 
     private var console: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("CONSOLE").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
-                Spacer()
-                Button { model.clearConsole() } label: { Label("Clear", systemImage: "trash") }
-                    .buttonStyle(.borderless).controlSize(.small)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 5)
-            Divider()
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Text(model.luaConsole.isEmpty ? "— output appears here —" : model.luaConsole)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(model.luaConsole.isEmpty ? ElectraTheme.textTertiary : .white.opacity(0.9))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                        .padding(10)
-                    Color.clear.frame(height: 1).id("bottom")
-                }
-                .onChange(of: model.luaConsole) { _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-            }
-        }
-        .frame(height: 190)
-        .background(Color(red: 0.08, green: 0.08, blue: 0.09))
+        ConsolePane(text: model.luaConsole, onClear: { model.clearConsole() })
+            .frame(height: 190)
     }
 }
 

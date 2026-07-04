@@ -8,6 +8,9 @@
  * All real work lives in lib/device.js.
  */
 
+const path = require('path');
+const fs   = require('fs');
+
 const { program } = require('commander');
 const transport   = require('../lib/transport');
 const device      = require('../lib/device');
@@ -35,6 +38,17 @@ const run = (fn) => (...args) =>
       transport.disconnect();
       process.exit(1);
     });
+
+/**
+ * Validate and parse the shared -b/-s flags, and produce the human-readable
+ * target label. Throws (with the CLI-friendly message) on bad input, so
+ * nothing gets printed for an invalid target.
+ */
+function targetFromOpts(opts, activeLabel = 'active slot') {
+  const { bank, slot } = device.parseSlot(opts.bank, opts.slot);
+  const where = bank != null ? `bank ${bank}, slot ${slot}` : activeLabel;
+  return { bank, slot, where };
+}
 
 // ── Command implementations ───────────────────────────────────────────────────
 
@@ -73,10 +87,7 @@ async function cmdInfo() {
 }
 
 async function cmdPull(opts) {
-  const bank = opts.bank != null ? parseInt(opts.bank, 10) : undefined;
-  const slot = opts.slot != null ? parseInt(opts.slot, 10) : undefined;
-
-  const where = bank != null ? `bank ${bank}, slot ${slot}` : 'active preset';
+  const { bank, slot, where } = targetFromOpts(opts, 'active preset');
   process.stdout.write(`Pulling ${where}… `);
 
   const { preset, outFile } = await device.pullPresetToFile({
@@ -90,15 +101,12 @@ async function cmdPull(opts) {
 }
 
 async function cmdPush(file, opts) {
-  const bank = opts.bank != null ? parseInt(opts.bank, 10) : undefined;
-  const slot = opts.slot != null ? parseInt(opts.slot, 10) : undefined;
-
   // Detect file type by extension
   if (file.endsWith('.lua')) {
     return cmdPushLua(file, opts);
   }
 
-  const where = bank != null ? `bank ${bank}, slot ${slot}` : 'active slot';
+  const { bank, slot, where } = targetFromOpts(opts);
   process.stdout.write(`Validating ${file}… `);
 
   // pushPresetFromFile validates JSON + structure before sending
@@ -109,40 +117,32 @@ async function cmdPush(file, opts) {
 }
 
 async function cmdPushLua(file, opts) {
-  const bank = opts.bank != null ? parseInt(opts.bank, 10) : undefined;
-  const slot = opts.slot != null ? parseInt(opts.slot, 10) : undefined;
-
-  const where = bank != null ? `bank ${bank}, slot ${slot}` : 'active slot';
+  const { bank, slot, where } = targetFromOpts(opts);
   process.stdout.write(`Uploading Lua to ${where}… `);
 
   const lua = await device.pushLuaFromFile(file, { bank, slot });
   log('ok\n');
-  log(`  Pushed : ${require('path').basename(file)} → ${where}`);
+  log(`  Pushed : ${path.basename(file)} → ${where}`);
   log(`  Lines  : ${lua.split('\n').length}\n`);
 }
 
 async function cmdPullLua(opts) {
-  const bank = opts.bank != null ? parseInt(opts.bank, 10) : undefined;
-  const slot = opts.slot != null ? parseInt(opts.slot, 10) : undefined;
-
-  const where = bank != null ? `bank ${bank}, slot ${slot}` : 'active preset';
+  const { bank, slot, where } = targetFromOpts(opts, 'active preset');
   process.stdout.write(`Pulling Lua from ${where}… `);
 
   const lua     = await device.getLua({ bank, slot });
   const outFile = opts.out || 'main.lua';
 
-  const { writeFileSync } = require('fs');
-  const { resolve } = require('path');
-  writeFileSync(outFile, lua, 'utf8');
+  fs.writeFileSync(outFile, lua, 'utf8');
 
   log('ok\n');
-  log(`  Saved: ${resolve(outFile)}`);
+  log(`  Saved: ${path.resolve(outFile)}`);
   log(`  Lines: ${lua.split('\n').length}\n`);
 }
 
 async function cmdScan(opts) {
   const bank      = opts.bank != null ? parseInt(opts.bank, 10) : 0;
-  const slotCount = opts.slots != null ? parseInt(opts.slots, 10) : 12;
+  const slotCount = opts.slots != null ? parseInt(opts.slots, 10) : device.SLOTS_PER_BANK;
 
   log(`\nScanning bank ${bank} (${slotCount} slots)…\n`);
   log(`  Slot  Status    Name`);
@@ -151,7 +151,7 @@ async function cmdScan(opts) {
   const results = await device.scanSlots({
     bank,
     slotCount,
-    timeoutMs: opts.timeout ? parseInt(opts.timeout, 10) : 3000,
+    timeoutMs: opts.timeout != null ? parseInt(opts.timeout, 10) : 3000,
     onSlot: (r) => {
       const status = r.status === 'ok'    ? 'ok      '
                    : r.status === 'empty' ? 'empty   '
@@ -165,6 +165,48 @@ async function cmdScan(opts) {
 
   const found = results.filter(r => r.status === 'ok');
   log(`\n  ${found.length} of ${slotCount} slots occupied in bank ${bank}.\n`);
+}
+
+async function cmdBackup(opts) {
+  const bank      = opts.bank   != null ? parseInt(opts.bank, 10)   : 0;
+  const slotCount = opts.slots  != null ? parseInt(opts.slots, 10)  : device.SLOTS_PER_BANK;
+  const outDir    = opts.out    || 'backup';
+
+  log(`\nBacking up bank ${bank} (${slotCount} slots) → ${outDir}/\n`);
+  log('  Slot  Result    Name / File');
+  log('  ────  ────────  ' + '─'.repeat(40));
+
+  const { saved, skipped } = await device.backupBank({
+    bank, slotCount, outDir,
+    onSlot: (s) => {
+      if (s.result === 'saved') {
+        log(`  [${String(s.slot).padStart(2,'0')}]  saved     ${s.name}  →  ${path.basename(s.file)}`);
+      } else if (s.result === 'empty') {
+        log(`  [${String(s.slot).padStart(2,'0')}]  empty     —`);
+      } else {
+        log(`  [${String(s.slot).padStart(2,'0')}]  error     (${s.error})`);
+      }
+    },
+  });
+
+  log(`\n  ✓ ${saved} preset(s) saved, ${skipped} slot(s) skipped.\n`);
+}
+
+async function cmdSwitch(opts) {
+  const bank = parseInt(opts.bank, 10);
+  const slot = parseInt(opts.slot, 10);
+  process.stdout.write(`Switching to bank ${bank}, slot ${slot}… `);
+  await device.switchSlot(bank, slot);
+  log('ok\n');
+}
+
+async function cmdClear(opts) {
+  const bank = parseInt(opts.bank, 10);
+  const slot = parseInt(opts.slot, 10);
+  process.stdout.write(`Clearing bank ${bank}, slot ${slot} (preset + Lua)… `);
+  await device.clearSlot(bank, slot);
+  log('ok\n');
+  log('  Slot is now empty.\n');
 }
 
 // ── CLI definition ────────────────────────────────────────────────────────────
@@ -222,46 +264,6 @@ program
   .option('-o, --out <file>', 'Output filename (default: main.lua)')
   .action(run(cmdPullLua));
 
-
-// ── backup ────────────────────────────────────────────────────────────────────
-async function cmdBackup(opts) {
-  const bank      = opts.bank   != null ? parseInt(opts.bank, 10)   : 0;
-  const slotCount = opts.slots  != null ? parseInt(opts.slots, 10)  : 12;
-  const outDir    = opts.out    || 'backup';
-
-  log(`\nBacking up bank ${bank} (${slotCount} slots) → ${outDir}/\n`);
-  log('  Slot  Result    Name / File');
-  log('  ────  ────────  ' + '─'.repeat(40));
-
-  const { saved, skipped } = await device.backupBank({
-    bank, slotCount, outDir,
-    onSlot: (s) => {
-      if (s.result === 'saved') {
-        log(`  [${String(s.slot).padStart(2,'0')}]  saved     ${s.name}  →  ${require('path').basename(s.file)}`);
-      } else if (s.result === 'empty') {
-        log(`  [${String(s.slot).padStart(2,'0')}]  empty     —`);
-      } else {
-        log(`  [${String(s.slot).padStart(2,'0')}]  error     (${s.error})`);
-      }
-    },
-  });
-
-  log(`\n  ✓ ${saved} preset(s) saved, ${skipped} slot(s) skipped.\n`);
-}
-
-// ── switch ────────────────────────────────────────────────────────────────────
-async function cmdSwitch(opts) {
-  if (opts.bank == null || opts.slot == null) {
-    err('\nError: --bank and --slot are required for switch\n');
-    process.exit(1);
-  }
-  const bank = parseInt(opts.bank, 10);
-  const slot = parseInt(opts.slot, 10);
-  process.stdout.write(`Switching to bank ${bank}, slot ${slot}… `);
-  await device.switchSlot(bank, slot);
-  log('ok\n');
-}
-
 program
   .command('backup')
   .description('Download all occupied preset slots in a bank to a directory')
@@ -269,15 +271,6 @@ program
   .option('-n, --slots <n>', 'Number of slots to check (default: 12)')
   .option('-o, --out <dir>', 'Output directory (default: ./backup)')
   .action(run(cmdBackup));
-
-async function cmdClear(opts) {
-  const bank = parseInt(opts.bank, 10);
-  const slot = parseInt(opts.slot, 10);
-  process.stdout.write(`Clearing bank ${bank}, slot ${slot} (preset + Lua)… `);
-  await device.clearSlot(bank, slot);
-  log('ok\n');
-  log('  Slot is now empty.\n');
-}
 
 program
   .command('switch')
@@ -300,7 +293,10 @@ program
     // The TUI is an ESM module (Ink); load it dynamically from CommonJS.
     import('../tui/app.mjs')
       .then((m) => m.start())
-      .then(() => process.exit(0))
+      .then(() => {
+        transport.disconnect();
+        process.exit(0);
+      })
       .catch((e) => {
         err(`\nError: ${e.message}\n`);
         transport.disconnect();

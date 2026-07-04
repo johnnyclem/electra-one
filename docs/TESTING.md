@@ -17,6 +17,12 @@ npm test
   transport that records the exact bytes each operation would send and feeds
   back canned responses. Covers slot validation, arm-then-upload ordering,
   empty-slot handling, scan/backup classification, and file I/O helpers.
+- `test/e2e-cli.test.js` — true end-to-end: spawns the real `bin/e1.js` as a
+  subprocess with `test/helpers/mock-midi.cjs` preloaded (a drop-in `midi`
+  replacement simulating an attached Electra One), and asserts on stdout, exit
+  codes, written files, and the exact SysEx frames put on the wire — including
+  fragmented-response reassembly, switch (0x09) vs arm (0x14) opcodes, and
+  validation failing before anything is sent.
 
 The hardware-dependent end-to-end render check is kept separate (it needs a
 device attached) and is **not** part of `npm test`:
@@ -27,9 +33,18 @@ npm run smoke   # requires a connected Electra One
 
 ## macOS app (`mac/`)
 
-Uses [swift-testing](https://github.com/apple/swift-testing) via a `.testTarget`
-covering the offline layers: `Protocol`, `SlotGeometry`, `PresetDocument`,
-project import, `E1Device.summarize`, and the `LuaEngine`.
+Uses [swift-testing](https://github.com/apple/swift-testing) via two
+`.testTarget`s:
+
+- `ElectraKitTests` — the offline layers: `Protocol`, `SlotGeometry`,
+  `PresetDocument`, project import, the `LuaEngine`, and `E1Device` driven
+  through an injected mock `E1TransportProtocol` (getInfo decode, empty-slot
+  throws, scan classification).
+- `ElectraOneAppTests` — app/UI logic: the editor↔document Lua sync and the
+  UI-driven Lua generation flows (Custom-control paint callbacks compile and
+  produce draw ops, script-button wrappers, paint-render caching, stale-script
+  clearing when switching presets). Backed by a temp script library so tests
+  never touch the user's real one.
 
 ```sh
 cd mac && ./run-tests.sh

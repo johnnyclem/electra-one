@@ -207,7 +207,8 @@
         {
           "message": {
             "type": "cc7",
-            "parameterNumber": 12
+            "parameterNumber": 12,
+            "deviceId": 1
           }
         }
       ],

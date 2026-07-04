@@ -1,12 +1,33 @@
 import Foundation
 
+/// The transport surface `E1Device` depends on. `MIDITransport` is the real
+/// CoreMIDI implementation; tests inject a mock to exercise the device layer
+/// without hardware.
+public protocol E1TransportProtocol: Sendable {
+    var connected: Bool { get }
+    @discardableResult
+    func connect() throws -> PortNames
+    func disconnect()
+    func query(_ bytes: [UInt8], timeout: TimeInterval) async throws -> (resource: UInt8, payload: [UInt8])
+    func command(_ bytes: [UInt8], timeout: TimeInterval) async throws
+}
+
+public extension E1TransportProtocol {
+    func query(_ bytes: [UInt8]) async throws -> (resource: UInt8, payload: [UInt8]) {
+        try await query(bytes, timeout: 6)
+    }
+    func command(_ bytes: [UInt8]) async throws {
+        try await command(bytes, timeout: 6)
+    }
+}
+
 /// High-level Electra One operations. An actor, so every exchange is
 /// serialized — which is exactly the single-in-flight guarantee the transport
 /// relies on. Mirrors lib/device.js.
 public actor E1Device {
-    private let transport: MIDITransport
+    private let transport: any E1TransportProtocol
 
-    public init(transport: MIDITransport = MIDITransport()) {
+    public init(transport: any E1TransportProtocol = MIDITransport()) {
         self.transport = transport
     }
 
@@ -62,9 +83,15 @@ public actor E1Device {
         try await transport.command(E1Proto.presetUpload(json: json))
     }
 
+    /// Lua script text for a slot (or the active slot when nil).
+    /// Throws `.empty` for empty slots, `.decode` for undecodable payloads.
     public func getLua(bank: Int?, slot: Int?) async throws -> String {
         let (_, payload) = try await transport.query(E1Proto.luaRequest(bank: bank, slot: slot))
-        return String(bytes: payload, encoding: .utf8) ?? ""
+        if payload.isEmpty { throw E1Error.empty }
+        guard let text = String(bytes: payload, encoding: .utf8) else {
+            throw E1Error.decode("Lua script is not valid text")
+        }
+        return text
     }
 
     /// Upload a preset and (optionally) its Lua script to a slot. Arms the slot
@@ -101,7 +128,9 @@ public actor E1Device {
     // ── Scanning ──────────────────────────────────────────────────────────
 
     /// Scan a single slot. Empty/timeout → `.empty`; malformed → `.error`.
-    public func scanSlot(bank: Int, slot: Int, timeout: TimeInterval = 1.5) async -> SlotState {
+    /// The 3s default matches the JS twin's per-slot scan timeout
+    /// (lib/device.js `scanSlots`, `timeoutMs = 3000`).
+    public func scanSlot(bank: Int, slot: Int, timeout: TimeInterval = 3.0) async -> SlotState {
         do {
             let (_, payload) = try await transport.query(
                 E1Proto.presetRequest(bank: bank, slot: slot), timeout: timeout)

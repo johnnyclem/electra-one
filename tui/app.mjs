@@ -23,12 +23,11 @@ const transport = require('../lib/transport');
 
 const html = htm.bind(React.createElement);
 
-const SLOTS_PER_BANK = 12;
-const BANKS = 6;
+const { SLOTS_PER_BANK, BANKS, safeName } = device;
 const SCAN_TIMEOUT = 1500;
 
-const safeName = (name) =>
-  (name || 'preset').trim().replace(/[^a-z0-9_\-. ]/gi, '_').replace(/\s+/g, '_').slice(0, 60);
+const freshSlots = () =>
+  Array.from({ length: SLOTS_PER_BANK }, (_, slot) => ({ slot, status: 'unknown' }));
 
 // ── Slot list ─────────────────────────────────────────────────────────────────
 
@@ -130,10 +129,6 @@ function App() {
 
   const scanToken = useRef(0); // cancels stale scans on bank change/refresh
 
-  function freshSlots() {
-    return Array.from({ length: SLOTS_PER_BANK }, (_, slot) => ({ slot, status: 'unknown' }));
-  }
-
   // Connect once on mount.
   useEffect(() => {
     let cancelled = false;
@@ -163,6 +158,8 @@ function App() {
         bank: targetBank,
         slotCount: SLOTS_PER_BANK,
         timeoutMs: SCAN_TIMEOUT,
+        // Stop burning slot-timeouts for a scan nobody is looking at anymore.
+        isCancelled: () => token !== scanToken.current,
         onSlot: (r) => {
           if (token !== scanToken.current) return; // a newer scan started
           setSlots((prev) => {
@@ -181,8 +178,6 @@ function App() {
   }, [status, bank, rescan]);
 
   // ── Operations ──────────────────────────────────────────────────────────────
-
-  const current = slots[cursor];
 
   const withBusy = async (msg, fn) => {
     setBusy(true);

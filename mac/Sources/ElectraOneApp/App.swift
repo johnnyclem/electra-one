@@ -2,11 +2,17 @@ import SwiftUI
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Set by the App on appear so quit can close the MIDI connection cleanly.
+    static weak var sharedModel: AppModel?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { AppDelegate.sharedModel?.shutdown() }
+    }
 }
 
 @main
@@ -19,7 +25,10 @@ struct ElectraOneApp: App {
             ContentView()
                 .environmentObject(model)
                 .frame(minWidth: 760, minHeight: 500)
-                .onAppear { model.start() }
+                .onAppear {
+                    AppDelegate.sharedModel = model
+                    model.start()
+                }
         }
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -35,9 +44,11 @@ struct ElectraOneApp: App {
                 Button("Save As…") { model.saveToFileAs() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(model.document == nil)
+                // Matches the toolbar: a script-only session (no document, but
+                // Lua in the editor) can also push.
                 Button("Save to Device…") { model.presentSaveToDevice() }
                     .keyboardShortcut("u", modifiers: .command)
-                    .disabled(model.document == nil || !model.isConnected)
+                    .disabled(!model.canPushToDevice)
             }
             CommandGroup(replacing: .undoRedo) {
                 Button("Undo") { model.undo() }

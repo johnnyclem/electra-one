@@ -136,7 +136,8 @@
         {
           "message": {
             "type": "cc7",
-            "parameterNumber": 8
+            "parameterNumber": 8,
+            "deviceId": 1
           }
         }
       ],
@@ -161,7 +162,8 @@
             "type": "cc7",
             "offValue": 0,
             "onValue": 127,
-            "parameterNumber": 5
+            "parameterNumber": 5,
+            "deviceId": 1
           },
           "defaultValue": "off",
           "function": "run"
@@ -184,7 +186,8 @@
             "type": "cc7",
             "offValue": 0,
             "onValue": 127,
-            "parameterNumber": 6
+            "parameterNumber": 6,
+            "deviceId": 1
           },
           "defaultValue": "off",
           "function": "stop"

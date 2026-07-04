@@ -94,9 +94,10 @@ test('slot without bank is rejected', async () => {
 });
 
 test('out-of-range bank/slot are rejected', async () => {
-  await assert.rejects(() => device.getPreset({ bank: 12, slot: 0 }), /--bank must be 0–11/);
-  await assert.rejects(() => device.getPreset({ bank: 0, slot: 99 }), /--slot must be 0–11/);
-  await assert.rejects(() => device.getPreset({ bank: -1, slot: 0 }), /--bank must be 0–11/);
+  // The hardware has 6 banks × 12 slots.
+  await assert.rejects(() => device.getPreset({ bank: 6, slot: 0 }), /--bank must be 0–5/);
+  await assert.rejects(() => device.getPreset({ bank: 0, slot: 12 }), /--slot must be 0–11/);
+  await assert.rejects(() => device.getPreset({ bank: -1, slot: 0 }), /--bank must be 0–5/);
 });
 
 test('bank/slot given as numeric strings are parsed', async () => {
@@ -230,9 +231,24 @@ test('scanSlots classifies ok / empty / error per slot', async () => {
 });
 
 test('scanSlots treats a timeout as an empty slot, not an error', async () => {
-  transport.query = async () => { throw new Error('Timeout — device did not respond'); };
+  transport.query = async () => { throw new transport.TimeoutError(); };
   const [r] = await device.scanSlots({ bank: 0, slotCount: 1 });
   assert.equal(r.status, 'empty');
+});
+
+test('scanSlots stops early when isCancelled reports true', async () => {
+  let queried = 0;
+  transport.query = async () => {
+    queried++;
+    return { resource: 1, payload: payloadOf({ name: 'P' }) };
+  };
+  const results = await device.scanSlots({
+    bank: 0,
+    slotCount: 12,
+    isCancelled: () => queried >= 2,
+  });
+  assert.equal(queried, 2, 'no further slots queried after cancellation');
+  assert.equal(results.length, 2, 'partial results returned');
 });
 
 test('scanSlots names an unnamed preset "(unnamed)"', async () => {
@@ -261,9 +277,10 @@ test('backupBank saves occupied slots and skips empties', async () => {
 
 // ── switchSlot / clearSlot ───────────────────────────────────────────────────
 
-test('switchSlot arms the given bank/slot', async () => {
+test('switchSlot sends the switch-and-load command (op 0x09), not the arm command', async () => {
   await device.switchSlot(1, 2);
-  assert.deepEqual(calls.command[0].msg, proto.presetSlotSelect(1, 2));
+  assert.deepEqual(calls.command[0].msg, proto.presetSlotSwitch(1, 2));
+  assert.equal(calls.command[0].msg[4], 0x09);
 });
 
 test('clearSlot sends the remove command', async () => {
@@ -273,10 +290,11 @@ test('clearSlot sends the remove command', async () => {
 
 // ── isEmptySlot ──────────────────────────────────────────────────────────────
 
-test('isEmptySlot recognizes EmptySlotError and timeout messages', () => {
+test('isEmptySlot recognizes EmptySlotError and typed timeouts', () => {
   assert.equal(device.isEmptySlot(new device.EmptySlotError()), true);
-  assert.equal(device.isEmptySlot(new Error('Timeout — device did not respond')), true);
-  assert.equal(device.isEmptySlot(new Error('did not respond')), true);
+  assert.equal(device.isEmptySlot(new transport.TimeoutError()), true);
+  // A generic error that merely *mentions* a timeout is NOT an empty slot.
+  assert.equal(device.isEmptySlot(new Error('Timeout — device did not respond')), false);
   assert.equal(device.isEmptySlot(new Error('NACK — device rejected the command')), false);
   assert.equal(device.isEmptySlot(null), false);
 });

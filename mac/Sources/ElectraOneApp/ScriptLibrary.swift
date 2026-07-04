@@ -48,8 +48,10 @@ final class ScriptLibrary {
     private(set) var scripts: [LibraryScript]
     private let fileURL: URL
 
-    init() {
-        fileURL = ScriptLibrary.storeURL()
+    /// `fileURL` is injectable so tests can point the library at a temp file
+    /// instead of the user's real Application Support store.
+    init(fileURL: URL = ScriptLibrary.storeURL()) {
+        self.fileURL = fileURL
         scripts = ScriptLibrary.load(from: fileURL)
     }
 

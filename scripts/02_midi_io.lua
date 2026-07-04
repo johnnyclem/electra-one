@@ -31,16 +31,28 @@ function sendProgramChange(channel, program)
 end
 
 -- Function to send a note (useful for triggering clips in Ableton)
+-- There is no blocking delay API in the Electra Lua environment, so the
+-- note-off is scheduled with the timer instead of a sleep.
+local pendingNoteOff = nil
+
 function sendNote(channel, note, velocity, durationMs)
     midi.sendNoteOn(PORT_1, channel, note, velocity)
     print(string.format("Note ON: ch=%d note=%d vel=%d", channel, note, velocity))
-    
-    -- Schedule note off (using simple delay - see transport for better timing)
-    -- Note: delay() pauses execution - use sparingly!
+
     if durationMs and durationMs > 0 then
-        helpers.delay(durationMs)
-        midi.sendNoteOff(PORT_1, channel, note, 0)
+        pendingNoteOff = { channel = channel, note = note }
+        timer.setPeriod(durationMs)
+        timer.enable()
+    end
+end
+
+-- Fires once per scheduled note-off, then disarms itself.
+function timer.onTick()
+    timer.disable()
+    if pendingNoteOff then
+        midi.sendNoteOff(PORT_1, pendingNoteOff.channel, pendingNoteOff.note, 0)
         print("Note OFF")
+        pendingNoteOff = nil
     end
 end
 
@@ -115,11 +127,12 @@ end
 -- SysEx handler - for patch dumps, deep editing, etc.
 function midi.onSysex(midiInput, sysexBlock)
     local length = sysexBlock:getLength()
-    local mfgId = sysexBlock:getManufacturerSysexId()
-    
-    print(string.format("SysEx received: %d bytes, Manufacturer ID: %d", 
+    -- Byte 1 is the manufacturer id (sysexBlock excludes the F0/F7 framing).
+    local mfgId = sysexBlock:peek(1)
+
+    print(string.format("SysEx received: %d bytes, Manufacturer ID: %d",
         length, mfgId))
-    
+
     -- Example: print first few bytes
     local preview = "Bytes: "
     for i = 1, math.min(10, length) do
@@ -180,11 +193,11 @@ function testNote()
     sendNote(1, 60, 100, 200)
 end
 
--- Send a test CC sweep
+-- Send a test CC sweep. The values go out back-to-back; if the receiver
+-- needs pacing, step the sweep from timer.onTick instead.
 function testCCSweep()
     for i = 0, 127, 16 do
         sendCC(1, 1, i)  -- Mod wheel sweep
-        helpers.delay(50)
     end
 end
 

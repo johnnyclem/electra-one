@@ -26,27 +26,44 @@ public enum E1Error: Error, CustomStringConvertible {
 public struct PortNames: Sendable {
     public let input: String
     public let output: String
+
+    public init(input: String, output: String) {
+        self.input = input
+        self.output = output
+    }
 }
 
 /// CoreMIDI transport for the Electra One.
 ///
 /// Mirrors lib/transport.js: one persistent client/port pair, SysEx exchanges
 /// serialized by the owning `E1Device` actor, fragmented responses reassembled
-/// until EOX. Large uploads are sent in a single packet list (CoreMIDI splits
-/// them on the wire); the device reassembles.
-public final class MIDITransport: @unchecked Sendable {
+/// until EOX. Large uploads go through `MIDISendSysex`, which streams the
+/// message in the background; the device reassembles.
+public final class MIDITransport: E1TransportProtocol, @unchecked Sendable {
     private var client = MIDIClientRef()
     private var inPort = MIDIPortRef()
     private var outPort = MIDIPortRef()
     private var source = MIDIEndpointRef()
     private var dest = MIDIEndpointRef()
 
-    public private(set) var connected = false
-    public private(set) var portNames: PortNames?
+    private var _connected = false
+    private var _portNames: PortNames?
+
+    public var connected: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _connected
+    }
+
+    public var portNames: PortNames? {
+        lock.lock(); defer { lock.unlock() }
+        return _portNames
+    }
 
     private let lock = NSLock()
     private var buffer: [UInt8] = []
     private var waiter: ((E1Proto.Message) -> Void)?
+    /// Fails the in-flight exchange from outside the message path (disconnect).
+    private var waiterFail: ((Error) -> Void)?
 
     public init() {}
 
@@ -102,34 +119,41 @@ public final class MIDITransport: @unchecked Sendable {
         if connected, let p = portNames { return p }
 
         var c = MIDIClientRef()
+        var ip = MIDIPortRef()
+        var op = MIDIPortRef()
+        // Tear down whatever was created so far when a later step fails, so a
+        // failed connect never leaks the client/ports.
+        func cleanup() {
+            if ip != 0 { MIDIPortDispose(ip) }
+            if op != 0 { MIDIPortDispose(op) }
+            if c != 0 { MIDIClientDispose(c) }
+        }
+
         var st = MIDIClientCreateWithBlock("ElectraOne" as CFString, &c, nil)
         guard st == noErr else { throw E1Error.midi(st, "MIDIClientCreate") }
-        client = c
 
-        var ip = MIDIPortRef()
-        st = MIDIInputPortCreateWithBlock(client, "ElectraOneIn" as CFString, &ip) { [weak self] listPtr, _ in
+        st = MIDIInputPortCreateWithBlock(c, "ElectraOneIn" as CFString, &ip) { [weak self] listPtr, _ in
             self?.receive(listPtr)
         }
-        guard st == noErr else { throw E1Error.midi(st, "MIDIInputPortCreate") }
-        inPort = ip
+        guard st == noErr else { cleanup(); throw E1Error.midi(st, "MIDIInputPortCreate") }
 
-        var op = MIDIPortRef()
-        st = MIDIOutputPortCreate(client, "ElectraOneOut" as CFString, &op)
-        guard st == noErr else { throw E1Error.midi(st, "MIDIOutputPortCreate") }
-        outPort = op
+        st = MIDIOutputPortCreate(c, "ElectraOneOut" as CFString, &op)
+        guard st == noErr else { cleanup(); throw E1Error.midi(st, "MIDIOutputPortCreate") }
 
         guard let (src, srcName) = bestSource(), let (dst, dstName) = bestDest() else {
-            throw E1Error.notFound
+            cleanup(); throw E1Error.notFound
         }
-        source = src
-        dest = dst
 
-        st = MIDIPortConnectSource(inPort, source, nil)
-        guard st == noErr else { throw E1Error.midi(st, "MIDIPortConnectSource") }
+        st = MIDIPortConnectSource(ip, src, nil)
+        guard st == noErr else { cleanup(); throw E1Error.midi(st, "MIDIPortConnectSource") }
 
         let names = PortNames(input: srcName, output: dstName)
-        portNames = names
-        connected = true
+        lock.lock()
+        client = c; inPort = ip; outPort = op
+        source = src; dest = dst
+        _portNames = names
+        _connected = true
+        lock.unlock()
         return names
     }
 
@@ -138,22 +162,37 @@ public final class MIDITransport: @unchecked Sendable {
         if inPort != 0 { MIDIPortDispose(inPort) }
         if outPort != 0 { MIDIPortDispose(outPort) }
         if client != 0 { MIDIClientDispose(client) }
+        lock.lock()
         inPort = 0; outPort = 0; client = 0; source = 0; dest = 0
-        connected = false
-        lock.lock(); buffer = []; waiter = nil; lock.unlock()
+        _connected = false
+        buffer = []
+        let fail = waiterFail
+        waiter = nil; waiterFail = nil
+        lock.unlock()
+        // Fail any in-flight exchange immediately instead of leaving it to
+        // time out.
+        fail?(E1Error.notConnected)
     }
 
     // ── Receive + reassembly ────────────────────────────────────────────────
 
     private func receive(_ listPtr: UnsafePointer<MIDIPacketList>) {
+        // `MIDIPacket.data` is declared as a 256-byte tuple, but CoreMIDI packs
+        // longer packets contiguously past it — read via the packet pointer +
+        // the field's offset so the full `length` bytes are captured.
+        let dataOffset = MemoryLayout<MIDIPacket>.offset(of: \MIDIPacket.data)!
         for pkt in listPtr.unsafeSequence() {
             let len = Int(pkt.pointee.length)
-            let bytes = withUnsafeBytes(of: pkt.pointee.data) { Array($0.prefix(len)) }
+            let bytes = [UInt8](UnsafeRawBufferPointer(
+                start: UnsafeRawPointer(pkt) + dataOffset, count: len))
             feed(bytes)
         }
     }
 
-    private func feed(_ bytes: [UInt8]) {
+    private func feed(_ raw: [UInt8]) {
+        // MIDI realtime bytes (0xF8…0xFF) may be interleaved mid-SysEx —
+        // drop them before reassembly.
+        let bytes = raw.filter { $0 < 0xF8 }
         var deliver: ((E1Proto.Message) -> Void)?
         var message: E1Proto.Message?
 
@@ -181,6 +220,45 @@ public final class MIDITransport: @unchecked Sendable {
 
     private func send(_ bytes: [UInt8]) throws {
         guard connected else { throw E1Error.notConnected }
+        // Everything we exchange is SysEx; route it through MIDISendSysex,
+        // which streams arbitrarily large messages in the background. A single
+        // MIDIPacketList caps out at 64 KB (and its add can fail silently),
+        // while presets/Lua can be several hundred KB.
+        if bytes.first == E1Proto.sox {
+            try sendSysex(bytes)
+        } else {
+            try sendPacketList(bytes)
+        }
+    }
+
+    private func sendSysex(_ bytes: [UInt8]) throws {
+        // The request struct and payload must outlive this call — CoreMIDI
+        // sends asynchronously and frees nothing. The completion proc
+        // deallocates both.
+        let data = UnsafeMutablePointer<UInt8>.allocate(capacity: max(1, bytes.count))
+        data.update(from: bytes, count: bytes.count)
+        let request = UnsafeMutablePointer<MIDISysexSendRequest>.allocate(capacity: 1)
+        request.initialize(to: MIDISysexSendRequest(
+            destination: dest,
+            data: data,
+            bytesToSend: UInt32(bytes.count),
+            complete: false,
+            reserved: (0, 0, 0),
+            completionProc: { req in
+                UnsafeMutablePointer(mutating: req.pointee.data).deallocate()
+                req.deallocate()
+            },
+            completionRefCon: nil))
+
+        let st = MIDISendSysex(request)
+        guard st == noErr else {
+            data.deallocate()
+            request.deallocate()
+            throw E1Error.midi(st, "MIDISendSysex")
+        }
+    }
+
+    private func sendPacketList(_ bytes: [UInt8]) throws {
         let listSize = bytes.count + 128
         let raw = UnsafeMutableRawPointer.allocate(
             byteCount: listSize,
@@ -203,23 +281,32 @@ public final class MIDITransport: @unchecked Sendable {
     // The owning E1Device actor guarantees one exchange at a time, so a single
     // `waiter` slot is sufficient.
 
-    /// Send a request and await the first `data` response.
+    /// Send a request and await the first `data` response. A NACK fails the
+    /// exchange immediately (no point waiting for the timeout).
     public func query(_ bytes: [UInt8], timeout: TimeInterval = 6) async throws -> (resource: UInt8, payload: [UInt8]) {
         try await withCheckedThrowingContinuation { cont in
             let state = ResumeOnce()
+            var timeoutItem: DispatchWorkItem?
             let finish: (Result<(resource: UInt8, payload: [UInt8]), Error>) -> Void = { result in
                 guard state.tryResume() else { return }
-                self.lock.lock(); self.waiter = nil; self.lock.unlock()
+                self.lock.lock(); self.waiter = nil; self.waiterFail = nil; self.lock.unlock()
+                timeoutItem?.cancel()
                 cont.resume(with: result)
             }
             lock.lock()
             waiter = { msg in
-                if case let .data(resource, payload) = msg {
+                switch msg {
+                case let .data(resource, payload):
                     finish(.success((resource: resource, payload: payload)))
+                case .nack:
+                    finish(.failure(E1Error.nack))
+                default:
+                    break // ignore notifications; keep waiting
                 }
             }
+            waiterFail = { finish(.failure($0)) }
             lock.unlock()
-            scheduleTimeout(timeout) { finish(.failure(E1Error.timeout)) }
+            timeoutItem = scheduleTimeout(timeout) { finish(.failure(E1Error.timeout)) }
             do { try send(bytes) } catch { finish(.failure(error)) }
         }
     }
@@ -228,9 +315,11 @@ public final class MIDITransport: @unchecked Sendable {
     public func command(_ bytes: [UInt8], timeout: TimeInterval = 6) async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             let state = ResumeOnce()
+            var timeoutItem: DispatchWorkItem?
             let finish: (Result<Void, Error>) -> Void = { result in
                 guard state.tryResume() else { return }
-                self.lock.lock(); self.waiter = nil; self.lock.unlock()
+                self.lock.lock(); self.waiter = nil; self.waiterFail = nil; self.lock.unlock()
+                timeoutItem?.cancel()
                 cont.resume(with: result)
             }
             lock.lock()
@@ -241,14 +330,19 @@ public final class MIDITransport: @unchecked Sendable {
                 default:    break // ignore notifications/data; keep waiting
                 }
             }
+            waiterFail = { finish(.failure($0)) }
             lock.unlock()
-            scheduleTimeout(timeout) { finish(.failure(E1Error.timeout)) }
+            timeoutItem = scheduleTimeout(timeout) { finish(.failure(E1Error.timeout)) }
             do { try send(bytes) } catch { finish(.failure(error)) }
         }
     }
 
-    private func scheduleTimeout(_ seconds: TimeInterval, _ fire: @escaping () -> Void) {
-        DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: fire)
+    /// Schedule a cancellable timeout — `finish` cancels it so the closure
+    /// doesn't linger after fast completions.
+    private func scheduleTimeout(_ seconds: TimeInterval, _ fire: @escaping () -> Void) -> DispatchWorkItem {
+        let item = DispatchWorkItem(block: fire)
+        DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: item)
+        return item
     }
 }
 

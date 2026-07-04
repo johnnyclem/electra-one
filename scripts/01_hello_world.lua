@@ -41,15 +41,9 @@ function preset.onReady()
     info.setText("Hello from Lua!")
 end
 
--- Called when user switches TO this preset
-function preset.onEnter()
-    print(">> preset.onEnter() - Activated this preset")
-end
-
--- Called when user switches AWAY from this preset
-function preset.onLeave()
-    print(">> preset.onLeave() - Leaving preset")
-end
+-- NOTE: onLoad and onReady are the only preset lifecycle callbacks.
+-- (There is no onEnter/onLeave — switching presets reloads the script,
+-- so onLoad/onReady fire again on every switch.)
 
 -- TIMER DEMO - timed execution
 -- ============================================================================

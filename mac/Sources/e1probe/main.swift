@@ -39,10 +39,26 @@ struct Probe {
         print("✓ lua self-test done")
     }
 
-    /// Offline model check — no device needed.
+    /// Repo root, resolved from this source file's path (…/mac/Sources/e1probe/
+    /// main.swift → four levels up) so the doc self-test isn't cwd-dependent.
+    static let repoRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()   // e1probe
+        .deletingLastPathComponent()   // Sources
+        .deletingLastPathComponent()   // mac
+        .deletingLastPathComponent()   // repo root
+        .path
+
+    /// Offline model check — no device needed. An explicit path argument after
+    /// "doc" overrides the demo-preset path.
     static func docSelfTest() {
         // Round-trip the bundled demo preset, if present.
-        let path = "../presets/b0_s00_Demo_Preset.json"
+        let args = CommandLine.arguments
+        let path: String
+        if let idx = args.firstIndex(of: "doc"), idx + 1 < args.count {
+            path = args[idx + 1]
+        } else {
+            path = "\(repoRoot)/presets/b0_s00_Demo_Preset.json"
+        }
         if let text = try? String(contentsOfFile: path, encoding: .utf8),
            let doc = PresetDocument(jsonString: text) {
             print("Loaded \"\(doc.name)\"  pages: \(doc.pages.count)  controls: \(doc.allControls().count)")
@@ -68,7 +84,8 @@ struct Probe {
         }
 
         // Import the example .eproj project (repo moved it into projects/).
-        let eprojCandidates = ["../projects/eventide_h9_max.eproj", "../eventide_h9_max.eproj"]
+        let eprojCandidates = ["\(repoRoot)/projects/eventide_h9_max.eproj",
+                               "\(repoRoot)/eventide_h9_max.eproj"]
         let eprojPath = eprojCandidates.first { FileManager.default.fileExists(atPath: $0) } ?? eprojCandidates[0]
         if let text = try? String(contentsOfFile: eprojPath, encoding: .utf8) {
             print("isProject(eproj): \(PresetDocument.isProject(text))")

@@ -26,8 +26,10 @@ import AppKit
     @Test func rasterizeStarterAndVUMeterToPNG() {
         // 1) the seeded starter bar
         let starter = PresetDocument.customPaintStarter(controlId: 1, colorHex: "F57000")
-        write(lua.paint(starter, controlId: 1, width: 220, height: 90, fraction: 0.66),
-              to: "custom_starter.png", w: 220, h: 90)
+        let r1 = lua.paint(starter, controlId: 1, width: 220, height: 90, fraction: 0.66)
+        #expect(r1.ok, "starter paint errored: \(r1.error ?? "?")")
+        #expect(!r1.ops.isEmpty)
+        #expect(write(r1, to: "custom_starter.png", w: 220, h: 90) != nil)
 
         // 2) a richer hand-written paint script (ADSR-style envelope)
         let adsr = """
@@ -46,12 +48,31 @@ import AppKit
           graphics.print(0, 2, "ADSR", w, LEFT)
         end)
         """
-        write(lua.paint(adsr, controlId: 1, width: 220, height: 90, fraction: 0.5),
-              to: "custom_adsr.png", w: 220, h: 90)
+        let r2 = lua.paint(adsr, controlId: 1, width: 220, height: 90, fraction: 0.5)
+        #expect(r2.ok, "adsr paint errored: \(r2.error ?? "?")")
+        #expect(!r2.ops.isEmpty)
+        #expect(write(r2, to: "custom_adsr.png", w: 220, h: 90) != nil)
+    }
+
+    @Test func paintStarterSanitizesColorHex() {
+        // A '#'-prefixed color must not leak into the Lua literal.
+        let src = PresetDocument.customPaintStarter(controlId: 7, colorHex: "#f20530")
+        #expect(src.contains("0xF20530"))
+        #expect(!src.contains("#F20530"))
+        #expect(lua.check(src) == nil, "starter should compile")
+        let r = lua.paint(src, controlId: 7, width: 100, height: 50, fraction: 0.5)
+        #expect(r.ok, "paint errored: \(r.error ?? "?")")
+        #expect(!r.ops.isEmpty)
+
+        // Nothing valid left → falls back to white.
+        let fallback = PresetDocument.customPaintStarter(controlId: 8, colorHex: "##")
+        #expect(fallback.contains("0xFFFFFF"))
     }
 
     /// Rasterize draw ops with the same op semantics the app's Canvas uses.
-    private func write(_ r: LuaEngine.PaintResult, to name: String, w: Int, h: Int) {
+    /// Returns the PNG data (nil if encoding failed) so callers can assert.
+    @discardableResult
+    private func write(_ r: LuaEngine.PaintResult, to name: String, w: Int, h: Int) -> Data? {
         let img = NSImage(size: NSSize(width: w, height: h))
         img.lockFocus()
         let ctx = NSGraphicsContext.current!.cgContext
@@ -66,6 +87,11 @@ import AppKit
             switch op.op {
             case "fillRect": ctx.fill(CGRect(x: op.x, y: op.y, width: op.a, height: op.b))
             case "rect":     ctx.stroke(CGRect(x: op.x, y: op.y, width: op.a, height: op.b))
+            case "fillRoundRect", "roundRect":
+                let path = CGPath(roundedRect: CGRect(x: op.x, y: op.y, width: op.a, height: op.b),
+                                  cornerWidth: op.c, cornerHeight: op.c, transform: nil)
+                ctx.addPath(path)
+                if op.op == "fillRoundRect" { ctx.fillPath() } else { ctx.strokePath() }
             case "line":
                 ctx.move(to: CGPoint(x: op.x, y: op.y)); ctx.addLine(to: CGPoint(x: op.a, y: op.b)); ctx.strokePath()
             case "fillCircle": ctx.fillEllipse(in: CGRect(x: op.x-op.a, y: op.y-op.a, width: op.a*2, height: op.a*2))
@@ -73,17 +99,21 @@ import AppKit
                 let s = op.text as NSString
                 ctx.saveGState(); ctx.translateBy(x: 0, y: CGFloat(h)); ctx.scaleBy(x: 1, y: -1)
                 let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: color, .font: NSFont.systemFont(ofSize: 11)]
-                s.draw(at: NSPoint(x: op.x, y: CGFloat(h) - op.y - 12), withAttributes: attrs)
+                // Honor the alignment field (op.b: 1 = center, 2 = right) the
+                // same way the app's Canvas replay does.
+                let width = s.size(withAttributes: attrs).width
+                let px = op.b == 1 ? op.x + (op.a - width) / 2 : (op.b == 2 ? op.x + op.a - width : op.x)
+                s.draw(at: NSPoint(x: px, y: CGFloat(h) - op.y - 12), withAttributes: attrs)
                 ctx.restoreGState()
             default: break
             }
         }
         img.unlockFocus()
-        if let tiff = img.tiffRepresentation, let bm = NSBitmapImageRep(data: tiff),
-           let png = bm.representation(using: .png, properties: [:]) {
-            let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(name)
-            try? png.write(to: url)
-            print("wrote \(url.path)")
-        }
+        guard let tiff = img.tiffRepresentation, let bm = NSBitmapImageRep(data: tiff),
+              let png = bm.representation(using: .png, properties: [:]) else { return nil }
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(name)
+        try? png.write(to: url)
+        print("wrote \(url.path)")
+        return png
     }
 }

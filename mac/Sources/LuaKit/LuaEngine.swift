@@ -53,15 +53,14 @@ public final class LuaEngine {
             return SimResult(output: "", error: "could not create Lua state", bottomText: nil)
         }
         defer { clua_close(L) }
+        if let perr = Self.globalString(L, "__preamble_err") {
+            return SimResult(output: "", error: "mock preamble failed: \(perr)", bottomText: nil)
+        }
         let rc = source.withCString { clua_run(L, $0) }
 
         // Pull back observable state regardless of success (a script may set the
         // status bar before erroring later).
-        var bottom: String? = nil
-        var buf = [CChar](repeating: 0, count: 256)
-        if clua_global_string(L, "__sim_bottom", &buf, buf.count) == 1 {
-            bottom = String(cString: buf)
-        }
+        let bottom = Self.globalString(L, "__sim_bottom")
 
         if rc == 0 {
             return SimResult(output: sink.text, error: nil, bottomText: bottom)
@@ -107,19 +106,36 @@ public final class LuaEngine {
         }
         defer { clua_close(L) }
 
+        if let perr = Self.globalString(L, "__preamble_err") {
+            return PaintResult(ops: [], error: "mock preamble failed: \(perr)")
+        }
         if source.withCString({ clua_run(L, $0) }) != 0 {
             return PaintResult(ops: [], error: Self.lastLine(sink.text))
         }
-        if clua_render(L, Int32(controlId), width, height, fraction) != 0 {
-            // No paint callback registered for this id, or it errored — not fatal;
-            // surface it as an empty canvas with a hint.
+        let rc = clua_render(L, Int32(controlId), width, height, fraction)
+        if rc == 1 {
+            // No paint callback registered for this id — not fatal; surface it
+            // as an empty canvas with a hint.
             return PaintResult(ops: [], error: "no paint callback for control \(controlId)")
         }
-        var buf = [CChar](repeating: 0, count: 64 * 1024)
-        guard clua_global_string(L, "__draw_json", &buf, buf.count) == 1 else {
+        if rc != 0 {
+            // The callback (or render machinery) errored — report the real message.
+            let msg = Self.globalString(L, "__render_err") ?? "paint callback failed"
+            return PaintResult(ops: [], error: msg)
+        }
+        guard let json = Self.globalString(L, "__draw_json") else {
             return PaintResult(ops: [], error: nil)
         }
-        return PaintResult(ops: Self.parseOps(String(cString: buf)), error: nil)
+        return PaintResult(ops: Self.parseOps(json), error: nil)
+    }
+
+    /// Read a global string of any length. Sizes the buffer to fit first — a
+    /// fixed-cap read would silently truncate large values like `__draw_json`.
+    private static func globalString(_ L: OpaquePointer?, _ name: String) -> String? {
+        let len = Int(clua_global_strlen(L, name))
+        var buf = [CChar](repeating: 0, count: len + 1)
+        guard clua_global_string(L, name, &buf, buf.count) == 1 else { return nil }
+        return String(cString: buf)
     }
 
     private static func lastLine(_ text: String) -> String {

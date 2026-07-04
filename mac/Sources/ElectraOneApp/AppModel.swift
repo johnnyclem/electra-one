@@ -49,7 +49,7 @@ final class AppModel: ObservableObject {
     // ── Script library ────────────────────────────────────────────────────────
     // A persistent collection of every Lua script the user writes, generates, or
     // imports — independent of any one preset. Lives on disk (see ScriptLibrary).
-    private let scriptLibrary = ScriptLibrary()
+    private let scriptLibrary: ScriptLibrary
     @Published var libraryScripts: [LibraryScript] = []
     @Published var libraryPresented = false
     /// The library entry currently loaded in the editor, if any — lets "Save"
@@ -97,16 +97,30 @@ final class AppModel: ObservableObject {
     private let undoLimit = 100
 
     private var scanToken = 0
+    private var started = false
+
+    /// Cache for Custom-control paint renders. The Lua interpreter is far too
+    /// expensive to run inside SwiftUI view bodies on every frame; keyed by
+    /// everything that affects the output so edits invalidate naturally.
+    private struct PaintCacheKey: Hashable {
+        let id: Int, w: Double, h: Double, fraction: Double, sourceHash: Int
+    }
+    private var paintCache: [PaintCacheKey: LuaEngine.PaintResult] = [:]
 
     enum AlignEdge { case left, centerH, right, top, centerV, bottom }
 
-    init() {
+    /// `scriptLibrary`/`seedSamples` are injectable so tests can run against a
+    /// temp store without touching the user's library or UserDefaults.
+    init(scriptLibrary: ScriptLibrary = ScriptLibrary(), seedSamples: Bool = true) {
+        self.scriptLibrary = scriptLibrary
         slots = (0..<slotsPerBank).map { SlotState(slot: $0, status: .unknown) }
         // Seed the built-in example scripts (once), so the library ships with a
         // set of known-good Electra One Lua examples covering MIDI and visuals.
         // Existing users pick up the set too; their own scripts are untouched.
-        scriptLibrary.seedExamples(
-            ExampleLuaScripts.all.map { ($0.name, $0.source) }, version: 1)
+        if seedSamples {
+            scriptLibrary.seedExamples(
+                ExampleLuaScripts.all.map { ($0.name, $0.source) }, version: 1)
+        }
         libraryScripts = scriptLibrary.scripts
     }
 
@@ -134,6 +148,9 @@ final class AppModel: ObservableObject {
     // ── Connection (non-fatal) ─────────────────────────────────────────────
 
     func start() {
+        // Every new window's onAppear calls this — connect only once.
+        guard !started else { return }
+        started = true
         Task {
             do {
                 let ports = try await device.connect()
@@ -149,6 +166,7 @@ final class AppModel: ObservableObject {
 
     func reconnect() {
         connection = .connecting
+        started = false
         start()
     }
 
@@ -162,7 +180,10 @@ final class AppModel: ObservableObject {
         rescan()
     }
 
-    func rescan() {
+    /// Rescan the current bank. `announce: false` keeps the status message of
+    /// whatever operation triggered the rescan (e.g. a push) from being
+    /// overwritten by "Scanned bank …" when the scan finishes.
+    func rescan(announce: Bool = true) {
         guard isConnected else { return }
         scanToken += 1
         let token = scanToken
@@ -174,7 +195,7 @@ final class AppModel: ObservableObject {
                 if token != scanToken { return }
                 slots[slot] = result
             }
-            if token == scanToken { message = "Scanned bank \(targetBank)." }
+            if token == scanToken, announce { message = "Scanned bank \(targetBank)." }
         }
     }
 
@@ -191,14 +212,13 @@ final class AppModel: ObservableObject {
                     self.deviceSlot = nil
                 }
             }
-            self.rescan()
+            self.rescan(announce: false)
             return "Cleared bank \(b), slot \(slot)."
         }
     }
 
     func openFromSlot(_ slot: Int) {
         guard isConnected else { return }
-        openSlot = slot
         let targetBank = bank
         busy = true
         message = "Loading bank \(targetBank), slot \(slot)…"
@@ -213,6 +233,7 @@ final class AppModel: ObservableObject {
                     doc.lua = lua
                 }
                 loadDocument(doc, fileURL: nil, deviceSlot: (targetBank, slot))
+                openSlot = slot   // only mark the slot open once the load succeeded
                 message = "Opened \"\(doc.name)\"."
             } catch let e as E1Error where isEmpty(e) {
                 message = "Slot \(slot) is empty. Use New Preset to build one, then Save to Device."
@@ -235,7 +256,10 @@ final class AppModel: ObservableObject {
         undoStack.removeAll()
         redoStack.removeAll()
         refreshUndoFlags()
-        if let l = doc.lua, !l.isEmpty { luaSource = l }
+        // Always replace the editor contents — carrying the previous preset's
+        // script over to a Lua-less preset silently attaches foreign Lua to it
+        // on the next push.
+        luaSource = doc.lua ?? ""
         // The editor now reflects this preset's Lua, not a library entry.
         activeLibraryScriptId = nil
     }
@@ -267,15 +291,23 @@ final class AppModel: ObservableObject {
     /// showing the preset screen, the status-bar text the script set, and the
     /// console output.
     func luaRun() {
+        simulateAndPresent(luaSource, label: "")
+    }
+
+    /// Shared build → simulate → present sequence for "Run" and script buttons.
+    /// The syntax check runs against the full editor source; `source` is what
+    /// actually executes (it may append a function invocation).
+    private func simulateAndPresent(_ source: String, label: String) {
+        let what = label.isEmpty ? "" : " \(label)"
         // A syntax error means there's nothing to run — surface it and stop.
         if let err = lua.check(luaSource) {
-            appendConsole("▶ Run — build failed:\n\(err)")
+            appendConsole("▶ Run\(what) — build failed:\n\(err)")
             simBottomText = ""
             simulatorPresented = true
             return
         }
-        appendConsole("▶ Run — launching simulator…")
-        let result = lua.simulate(luaSource)
+        appendConsole("▶ Run\(what) — launching simulator…")
+        let result = lua.simulate(source)
         if !result.output.isEmpty { appendConsole(result.output) }
         if let err = result.error {
             appendConsole("✗ \(err)")
@@ -420,6 +452,7 @@ final class AppModel: ObservableObject {
         let model = aiModel
         let ctx = presetControlContext
         aiBusy = true
+        let previousSource = luaSource // restored if generation fails
         luaSource = "" // clear; tokens stream in live
         appendConsole("✨ Streaming with \(model) @ \(base): \(prompt)")
         var reasonedShown = false
@@ -447,6 +480,8 @@ final class AppModel: ObservableObject {
                 appendConsole("✓ Script generated (\(lua.split(separator: "\n").count) lines). Review, Build, and Run.\(libNote)")
                 aiPrompt = ""
             } catch {
+                // A failed generation must not eat the user's script.
+                luaSource = previousSource
                 let msg = (error as? AIClient.AIError)?.description ?? error.localizedDescription
                 appendConsole("✗ AI error: \(msg)")
                 message = "AI error: \(msg)"
@@ -589,7 +624,7 @@ final class AppModel: ObservableObject {
             }
             self.bank = b
             self.openSlot = s
-            self.rescan()
+            self.rescan(announce: false)
             return "Pushed \"\(doc.name)\"\(luaNote) → bank \(b), slot \(s) and loaded it."
         }
     }
@@ -686,10 +721,18 @@ final class AppModel: ObservableObject {
     /// Render a Custom control's paint callback against the preset's current Lua,
     /// returning the recorded draw ops for the canvas to replay. `fraction` is the
     /// simulated 0..1 value (no live hardware value offline).
+    /// Results are cached — SwiftUI calls this from view bodies, and running the
+    /// interpreter per frame for every Custom control makes dragging crawl.
     func renderCustomControl(id: Int, width: Double, height: Double,
                              fraction: Double) -> LuaEngine.PaintResult {
         let src = luaSource.isEmpty ? (document?.lua ?? "") : luaSource
-        return lua.paint(src, controlId: id, width: width, height: height, fraction: fraction)
+        let key = PaintCacheKey(id: id, w: width, h: height, fraction: fraction,
+                                sourceHash: src.hashValue)
+        if let cached = paintCache[key] { return cached }
+        let result = lua.paint(src, controlId: id, width: width, height: height, fraction: fraction)
+        if paintCache.count > 128 { paintCache.removeAll(keepingCapacity: true) }
+        paintCache[key] = result
+        return result
     }
 
     /// Jump to the Lua editor to edit a Custom control's paint callback.
@@ -754,23 +797,7 @@ final class AppModel: ObservableObject {
         let fn = document?.control(id: id)?.functionName
             ?? PresetDocument.scriptFunctionName(forControlId: id)
         let name = document?.control(id: id)?.name ?? fn
-        if let err = lua.check(luaSource) {
-            appendConsole("▶ Run \(name) — build failed:\n\(err)")
-            simBottomText = ""
-            simulatorPresented = true
-            return
-        }
-        appendConsole("▶ Run \(name) …")
-        let combined = luaSource + "\n\n\(fn)(nil, 127)\n"
-        let result = lua.simulate(combined)
-        if !result.output.isEmpty { appendConsole(result.output) }
-        if let err = result.error {
-            appendConsole("✗ \(err)")
-        } else {
-            appendConsole("✓ finished")
-        }
-        simBottomText = result.bottomText ?? ""
-        simulatorPresented = true
+        simulateAndPresent(luaSource + "\n\n\(fn)(nil, 127)\n", label: name)
     }
 
     /// Jump to the Lua editor so the user can edit a script button's function.
@@ -947,8 +974,9 @@ final class AppModel: ObservableObject {
     }
 
     private func isEmpty(_ e: E1Error) -> Bool {
+        // Only a genuine empty-slot answer counts; a timeout is a communication
+        // problem and should be reported as one, not as "slot is empty".
         if case .empty = e { return true }
-        if case .timeout = e { return true }
         return false
     }
 

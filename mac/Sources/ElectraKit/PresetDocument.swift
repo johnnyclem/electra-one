@@ -28,7 +28,8 @@ public struct PresetDocument {
     public static let screenWidth: Double = SlotGeometry.canvasWidth
     public static let screenHeight: Double = SlotGeometry.canvasHeight
 
-    /// The six assignable Electra colors (plus white) for the palette picker.
+    /// The five assignable Electra accent colors, plus white, for the palette
+    /// picker.
     public static let palette: [String] = [
         "FFFFFF", "F45C51", "F49500", "529DEC", "03A598", "C44795",
     ]
@@ -257,17 +258,33 @@ public struct PresetDocument {
     /// Set the parameter number of a specific value by id (for multi-value
     /// controls like ADSR).
     public mutating func setValueParameterNumber(controlId: Int, valueId: String, _ number: Int) {
+        let dev = (root["devices"] as? [[String: Any]])?.first?["id"] as? Int ?? 1
         mutateControl(id: controlId) { c in
             var values = c["values"] as? [[String: Any]] ?? []
             for i in values.indices where (values[i]["id"] as? String) == valueId {
                 var v = values[i]
-                var m = v["message"] as? [String: Any] ?? ["type": "cc7", "min": 0, "max": 127]
+                var m = v["message"] as? [String: Any] ?? ["type": "cc7", "min": 0, "max": 127, "deviceId": dev]
                 m["parameterNumber"] = number
                 v["message"] = m
                 values[i] = v
             }
             c["values"] = values
         }
+    }
+
+    /// Build the four ADSR inputs + CC values (attack/decay/sustain/release) —
+    /// shared by `addControl` and `setControlKind`.
+    private static func adsrInputsAndValues(basePot: Int, baseParameter: Int, deviceId: Int)
+        -> (inputs: [[String: Any]], values: [[String: Any]]) {
+        let inputs: [[String: Any]] = adsrValueIds.enumerated().map { i, vid in
+            ["potId": min(12, basePot + i), "valueId": vid]
+        }
+        let values: [[String: Any]] = adsrValueIds.enumerated().map { i, vid in
+            ["id": vid, "defaultValue": 0,
+             "message": ["type": "cc7", "min": 0, "max": 127,
+                         "parameterNumber": baseParameter + i, "deviceId": deviceId]]
+        }
+        return (inputs, values)
     }
 
     /// Change a control's kind, updating type/variant and (for ADSR) the value
@@ -285,13 +302,9 @@ public struct PresetDocument {
             if isADSR && !hasADSRShape {
                 let base = (existing.first?["message"] as? [String: Any])?["parameterNumber"] as? Int ?? 1
                 let pot = (c["inputs"] as? [[String: Any]])?.first?["potId"] as? Int ?? 1
-                c["inputs"] = Self.adsrValueIds.enumerated().map { i, vid in
-                    ["potId": min(12, pot + i), "valueId": vid]
-                }
-                c["values"] = Self.adsrValueIds.enumerated().map { i, vid in
-                    ["id": vid, "defaultValue": 0,
-                     "message": ["type": "cc7", "min": 0, "max": 127, "parameterNumber": base + i, "deviceId": dev]]
-                }
+                let (inputs, values) = Self.adsrInputsAndValues(basePot: pot, baseParameter: base, deviceId: dev)
+                c["inputs"] = inputs
+                c["values"] = values
             } else if !isADSR && hasADSRShape {
                 // Collapse the 4 ADSR values back to a single value.
                 let first = existing.first ?? [:]
@@ -328,64 +341,133 @@ public struct PresetDocument {
         return newId
     }
 
+    // ── New-control bootstrap (shared by addControl/addScriptControl) ────────
+
+    /// Everything a fresh control needs before its type-specific fields.
+    private struct NewControlSeed {
+        var id: Int
+        var deviceId: Int
+        var bounds: SlotGeometry.Bounds
+        var pot: Int
+        var controlSetId: Int
+        var color: String
+        var parameterNumber: Int
+    }
+
+    /// Allocate the next control id, resolve the device id, pick the first free
+    /// grid slot, and derive pot/control-set/color plus a CC parameter number.
+    private func newControlSeed(in controls: [[String: Any]], pageId: Int,
+                                deviceId: Int?, span: Int, parameterCount: Int) -> NewControlSeed {
+        let newId = (controls.compactMap { $0["id"] as? Int }.max() ?? 0) + 1
+        let dev = deviceId ?? (root["devices"] as? [[String: Any]])?.first?["id"] as? Int ?? 1
+        let slot = Self.firstFreeSlot(onPage: pageId, span: span, in: controls)
+        let (col, row) = SlotGeometry.cell(forSlot: slot)
+        var b = SlotGeometry.bounds(forSlot: slot)
+        b.w += Double(span - 1) * SlotGeometry.pitchX
+        return NewControlSeed(
+            id: newId,
+            deviceId: dev,
+            bounds: b,
+            pot: SlotGeometry.pot(col: col, row: row),
+            controlSetId: SlotGeometry.controlSet(forRow: row),
+            color: Self.palette[1 + (newId % (Self.palette.count - 1))],
+            // Ids keep growing past the 0…127 CC range, so parameter numbers
+            // are allocated independently (lowest unused wins).
+            parameterNumber: Self.lowestUnusedParameter(count: parameterCount, in: controls))
+    }
+
+    /// First grid slot (1…36) on the page whose `span` columns are all free,
+    /// judged from actual control bounds — a plain count would drift after
+    /// deletions or wide (2-column) controls and cause overlaps.
+    private static func firstFreeSlot(onPage pageId: Int, span: Int, in controls: [[String: Any]]) -> Int {
+        var occupied = Set<Int>()
+        for c in controls where (c["pageId"] as? Int) == pageId {
+            guard let b = (c["bounds"] as? [Double]) ?? (c["bounds"] as? [Int])?.map(Double.init),
+                  b.count == 4 else { continue }
+            let slot = SlotGeometry.slot(forBounds: b[0], b[1])
+            occupied.insert(slot)
+            // Wide controls also occupy the extra columns they span.
+            let extraCols = max(0, Int(((b[2] - SlotGeometry.slotWidth) / SlotGeometry.pitchX).rounded()))
+            if extraCols > 0 {
+                for k in 1...extraCols { occupied.insert(slot + k) }
+            }
+        }
+        for slot in 1...SlotGeometry.slotsPerPage {
+            let (col, _) = SlotGeometry.cell(forSlot: slot)
+            guard col + span <= SlotGeometry.columns else { continue }   // don't wrap a row
+            if (0..<span).allSatisfy({ !occupied.contains(slot + $0) }) { return slot }
+        }
+        return 1  // page full — overlap at the origin rather than fail
+    }
+
+    /// Lowest CC parameter number with `count` consecutive unused values,
+    /// gathered from every message in the preset. Returns 0 if the space is
+    /// exhausted.
+    private static func lowestUnusedParameter(count: Int, in controls: [[String: Any]]) -> Int {
+        var used = Set<Int>()
+        for c in controls {
+            for v in c["values"] as? [[String: Any]] ?? [] {
+                if let m = v["message"] as? [String: Any], let p = m["parameterNumber"] as? Int {
+                    used.insert(p)
+                }
+            }
+        }
+        search: for p in 1...(128 - count) {
+            for k in 0..<count where used.contains(p + k) { continue search }
+            return p
+        }
+        return 0
+    }
+
     /// Add a fresh control of the given kind, placed in the next free grid cell.
     @discardableResult
     public mutating func addControl(kind: ControlKind = .fader, pageId: Int, deviceId: Int? = nil) -> Int {
         var controls = root["controls"] as? [[String: Any]] ?? []
-        let newId = (controls.compactMap { $0["id"] as? Int }.max() ?? 0) + 1
-        let dev = deviceId ?? (root["devices"] as? [[String: Any]])?.first?["id"] as? Int ?? 1
-
-        // Place into the next free slot on the 6×6 grid.
-        let used = controls.filter { ($0["pageId"] as? Int) == pageId }.count
-        let slot = (used % SlotGeometry.slotsPerPage) + 1
-        let (col, row) = SlotGeometry.cell(forSlot: slot)
-        let b = SlotGeometry.bounds(forSlot: slot)
-        let pot = SlotGeometry.pot(col: col, row: row)
+        // Custom + ADSR span two columns (Custom to give the paint script room);
+        // ADSR needs four consecutive CC numbers, one per value.
+        let span = (kind == .custom || kind == .adsr) ? 2 : 1
+        let seed = newControlSeed(in: controls, pageId: pageId, deviceId: deviceId,
+                                  span: span, parameterCount: kind == .adsr ? 4 : 1)
 
         var control: [String: Any] = [
-            "id": newId,
+            "id": seed.id,
             "type": kind.rawType,
             "visible": true,
-            "name": kind == .adsr ? "ADSR" : (kind == .custom ? "Custom" : "CC #\(newId)"),
-            "color": Self.palette[1 + (newId % (Self.palette.count - 1))],
+            "name": kind == .adsr ? "ADSR" : (kind == .custom ? "Custom" : "CC #\(seed.parameterNumber)"),
+            "color": seed.color,
             "pageId": pageId,
-            "controlSetId": SlotGeometry.controlSet(forRow: row),
+            "controlSetId": seed.controlSetId,
+            "bounds": seed.bounds.array,
         ]
         if let v = kind.rawVariant { control["variant"] = v }
 
         if kind == .custom {
-            // A Custom control spans two columns to give the paint script room.
-            // Its value is a *virtual* parameter (no MIDI mapping) — this mirrors
-            // the working custom-control format the Electra One editor produces;
-            // a `cc7` value here leaves the control non-custom and blank on device.
-            control["bounds"] = [b.x, b.y, b.w + SlotGeometry.pitchX, b.h].map { Int($0.rounded()) }
-            control["inputs"] = [["potId": pot, "valueId": "value"]]
+            // A Custom control's value is a *virtual* parameter (no MIDI
+            // mapping) — this mirrors the working custom-control format the
+            // Electra One editor produces; a `cc7` value here leaves the
+            // control non-custom and blank on device.
+            control["inputs"] = [["potId": seed.pot, "valueId": "value"]]
             control["values"] = [[
                 "id": "value", "defaultValue": 0,
-                "message": ["type": "virtual", "parameterNumber": newId, "deviceId": dev],
+                "message": ["type": "virtual", "parameterNumber": seed.parameterNumber, "deviceId": seed.deviceId],
             ]]
         } else if kind == .adsr {
-            // ADSR spans two columns and carries four CC values.
-            control["bounds"] = [b.x, b.y, b.w + SlotGeometry.pitchX, b.h].map { Int($0.rounded()) }
-            control["inputs"] = Self.adsrValueIds.enumerated().map { i, vid in
-                ["potId": min(12, pot + i), "valueId": vid]
-            }
-            control["values"] = Self.adsrValueIds.enumerated().map { i, vid in
-                ["id": vid, "defaultValue": 0,
-                 "message": ["type": "cc7", "min": 0, "max": 127, "parameterNumber": newId + i, "deviceId": dev]]
-            }
+            // ADSR carries four CC values.
+            let (inputs, values) = Self.adsrInputsAndValues(
+                basePot: seed.pot, baseParameter: seed.parameterNumber, deviceId: seed.deviceId)
+            control["inputs"] = inputs
+            control["values"] = values
         } else {
-            control["bounds"] = b.array
-            control["inputs"] = [["potId": pot, "valueId": "value"]]
+            control["inputs"] = [["potId": seed.pot, "valueId": "value"]]
             control["values"] = [[
                 "id": "value", "defaultValue": 0,
-                "message": ["type": "cc7", "min": 0, "max": 127, "parameterNumber": newId, "deviceId": dev],
+                "message": ["type": "cc7", "min": 0, "max": 127, "parameterNumber": seed.parameterNumber, "deviceId": seed.deviceId],
             ]]
         }
 
         controls.append(control)
         root["controls"] = controls
-        return newId
+        return seed.id
     }
 
     /// The conventional Lua function name for a script button with the given id.
@@ -403,7 +485,11 @@ public struct PresetDocument {
     /// Shared by the app (seeding) and tests so both use identical Lua.
     public static func customPaintStarter(controlId id: Int, colorHex: String) -> String {
         let fn = paintFunctionName(forControlId: id)
-        let hex = "0x" + colorHex.uppercased()
+        // Sanitize: colors can arrive as "#F20530" etc. Keep only hex digits,
+        // falling back to white when nothing valid remains — anything else
+        // would produce a Lua syntax error.
+        let cleaned = colorHex.uppercased().filter(\.isHexDigit)
+        let hex = "0x" + (cleaned.isEmpty ? "FFFFFF" : cleaned)
         return """
         -- Custom control \(id): draws its own graphics via a paint callback.
         -- Coordinates are LOCAL to the control (0,0 = its top-left corner).
@@ -436,37 +522,31 @@ public struct PresetDocument {
     @discardableResult
     public mutating func addScriptControl(pageId: Int, deviceId: Int? = nil) -> Int {
         var controls = root["controls"] as? [[String: Any]] ?? []
-        let newId = (controls.compactMap { $0["id"] as? Int }.max() ?? 0) + 1
-        let dev = deviceId ?? (root["devices"] as? [[String: Any]])?.first?["id"] as? Int ?? 1
-
-        let used = controls.filter { ($0["pageId"] as? Int) == pageId }.count
-        let slot = (used % SlotGeometry.slotsPerPage) + 1
-        let (col, row) = SlotGeometry.cell(forSlot: slot)
-        let b = SlotGeometry.bounds(forSlot: slot)
-        let pot = SlotGeometry.pot(col: col, row: row)
+        let seed = newControlSeed(in: controls, pageId: pageId, deviceId: deviceId,
+                                  span: 1, parameterCount: 1)
 
         let control: [String: Any] = [
-            "id": newId,
+            "id": seed.id,
             "type": "pad",
             "mode": "momentary",
             "visible": true,
             "name": "Script",
-            "color": Self.palette[1 + (newId % (Self.palette.count - 1))],
+            "color": seed.color,
             "pageId": pageId,
-            "controlSetId": SlotGeometry.controlSet(forRow: row),
-            "bounds": b.array,
-            "inputs": [["potId": pot, "valueId": "value"]],
+            "controlSetId": seed.controlSetId,
+            "bounds": seed.bounds.array,
+            "inputs": [["potId": seed.pot, "valueId": "value"]],
             "values": [[
                 "id": "value",
-                "function": Self.scriptFunctionName(forControlId: newId),
+                "function": Self.scriptFunctionName(forControlId: seed.id),
                 "message": ["type": "cc7", "onValue": 127, "offValue": 0,
-                            "parameterNumber": newId, "deviceId": dev],
+                            "parameterNumber": seed.parameterNumber, "deviceId": seed.deviceId],
             ]],
         ]
 
         controls.append(control)
         root["controls"] = controls
-        return newId
+        return seed.id
     }
 
     public mutating func renamePage(id: Int, to name: String) {
@@ -488,6 +568,12 @@ public struct PresetDocument {
 
     // ── Templates ────────────────────────────────────────────────────────────
 
+    /// The default device entry used when a preset (or imported project)
+    /// declares none. Shared with ProjectImport.
+    static let defaultDevice: [String: Any] = [
+        "id": 1, "name": "MIDI Device 1", "port": 1, "channel": 1,
+    ]
+
     public static func newPreset(name: String = "New Preset") -> PresetDocument {
         let root: [String: Any] = [
             "version": 2,
@@ -497,9 +583,7 @@ public struct PresetDocument {
                 ["id": 1, "name": "Page 1"],
                 ["id": 2, "name": "Page 2"],
             ],
-            "devices": [
-                ["id": 1, "name": "MIDI Device 1", "port": 1, "channel": 1],
-            ],
+            "devices": [Self.defaultDevice],
             "groups": [[String: Any]](),
             "overlays": [[String: Any]](),
             "controls": [[String: Any]](),
@@ -507,8 +591,10 @@ public struct PresetDocument {
         return PresetDocument(root: root)
     }
 
-    private static func makeProjectId() -> String {
-        let chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-        return String((0..<20).map { _ in chars.randomElement()! })
+    /// 20-char alphanumeric project id (the format the web editor generates).
+    /// Internal so ProjectImport can mint ids without building a whole preset.
+    static func makeProjectId() -> String {
+        let chars = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+        return String((0..<20).map { _ in chars[Int.random(in: 0..<chars.count)] })
     }
 }

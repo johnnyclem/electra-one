@@ -106,22 +106,8 @@ function advancePhase()
     lfo.phase = (lfo.phase + phaseIncrement) % 1.0
 end
 
--- TIMER CALLBACK
--- ============================================================================
-function timer.onTick()
-    if not lfo.enabled then
-        return
-    end
-    
-    -- Calculate and send LFO value
-    local output = calculateLFO()
-    
-    -- Send as CC message
-    midi.sendControlChange(PORT_1, lfo.targetChannel, lfo.targetCC, output)
-    
-    -- Advance phase for next tick
-    advancePhase()
-end
+-- The timer callback lives further down (after the visualizer) so it can
+-- also drive the periodic repaint.
 
 -- LFO CONTROL FUNCTIONS
 -- ============================================================================
@@ -150,7 +136,9 @@ end
 
 function setLFODepth(valueObject, value)
     lfo.depth = value / 2  -- 0-127 -> 0-63.5 (half range each direction)
-    print(string.format("LFO Depth: %d", lfo.depth))
+    -- lfo.depth is a float; %d would raise "number has no integer
+    -- representation" on the device's Lua 5.3+.
+    print(string.format("LFO Depth: %d", math.floor(lfo.depth)))
 end
 
 function setLFOWaveform(valueObject, value)
@@ -182,44 +170,46 @@ end
 
 -- CUSTOM CONTROL: LFO VISUALIZER
 -- ============================================================================
--- This draws the LFO waveform on a Custom control type
+-- This draws the LFO waveform on a Custom control type.
+-- Paint-callback coordinates are LOCAL to the control (0,0 = its top-left),
+-- and the firmware graphics primitives require integer coordinates.
 
-function drawLFOVisualizer(control, x, y, width, height)
+function drawLFOVisualizer(width, height)
     -- Background
     graphics.setColor(0x202020)
-    graphics.fillRect(x, y, width, height)
-    
+    graphics.fillRect(0, 0, width, height)
+
     -- Border
     graphics.setColor(0x404040)
-    graphics.drawRect(x, y, width, height)
-    
+    graphics.drawRect(0, 0, width, height)
+
     -- Center line
     graphics.setColor(0x606060)
-    local centerY = y + height / 2
-    graphics.drawLine(x, centerY, x + width, centerY)
-    
+    local centerY = math.floor(height / 2)
+    graphics.drawLine(0, centerY, width, centerY)
+
     -- Draw waveform
     graphics.setColor(0x00FFFF)  -- Cyan
-    
+
     local prevY = nil
     for i = 0, width - 1 do
         local phase = i / width
         local value = getWaveformValue(phase, lfo.waveform)
-        local drawY = centerY - value * (height / 2 - 4)
-        
+        local drawY = math.floor(centerY - value * (height / 2 - 4))
+
         if prevY then
-            graphics.drawLine(x + i - 1, prevY, x + i, drawY)
+            graphics.drawLine(i - 1, prevY, i, drawY)
         end
         prevY = drawY
     end
-    
+
     -- Draw current phase position
-    local phaseX = x + lfo.phase * width
+    local phaseX = math.floor(lfo.phase * width)
     graphics.setColor(0xFF0000)  -- Red playhead
-    graphics.drawLine(phaseX, y + 2, phaseX, y + height - 2)
-    
+    graphics.drawLine(phaseX, 2, phaseX, height - 2)
+
     -- Draw current output value as a dot
-    local outputY = centerY - (lfo.lastOutput - 64) / 64 * (height / 2 - 4)
+    local outputY = math.floor(centerY - (lfo.lastOutput - 64) / 64 * (height / 2 - 4))
     graphics.setColor(0xFFFF00)  -- Yellow
     graphics.fillCircle(phaseX, outputY, 4)
 end
@@ -231,14 +221,15 @@ function setupVisualizer(controlId)
     if ctrl then
         ctrl:setPaintCallback(function(control)
             local bounds = control:getBounds()
-            drawLFOVisualizer(control, bounds[X], bounds[Y], 
-                             bounds[WIDTH], bounds[HEIGHT])
+            drawLFOVisualizer(bounds[WIDTH], bounds[HEIGHT])
         end)
         print("LFO Visualizer setup on control " .. controlId)
     end
 end
 
--- Repaint the visualizer periodically
+-- TIMER CALLBACK
+-- ============================================================================
+-- Sends the LFO value and repaints the visualizer periodically.
 local repaintCounter = 0
 local REPAINT_INTERVAL = 5  -- Every 5 timer ticks (100ms at 50Hz)
 
@@ -273,8 +264,9 @@ function preset.onReady()
     -- Initialize timer at 50Hz (20ms period)
     timer.setPeriod(TIMER_PERIOD_MS)
     
-    -- Create waveform overlay for list control
-    overlays.create(1, {
+    -- Create waveform overlay for list control. Use a high id so it can't
+    -- collide with overlays defined in the preset JSON (ids 1-51).
+    overlays.create(100, {
         {value = 0, label = "Sine"},
         {value = 1, label = "Triangle"},
         {value = 2, label = "Saw Up"},
@@ -295,7 +287,7 @@ end
 -- 1. PAD "Enable" - Function: enableLFO
 -- 2. FADER "Rate" - Function: setLFORate, Formatter: formatLFORate
 -- 3. FADER "Depth" - Function: setLFODepth
--- 4. LIST "Wave" - Function: setLFOWaveform, Overlay ID: 1
+-- 4. LIST "Wave" - Function: setLFOWaveform, Overlay ID: 100
 -- 5. FADER "Target CC" - Function: setLFOTargetCC, Min: 0, Max: 127
 -- 6. FADER "Center" - Function: setLFOCenter, Default: 64
 -- 7. (Optional) CUSTOM "Display" - for waveform visualization

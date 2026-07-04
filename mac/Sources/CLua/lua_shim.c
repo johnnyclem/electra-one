@@ -134,8 +134,11 @@ static const char *PREAMBLE =
 "  end\n"
 "  return table.concat(t, '\\n')\n"
 "end\n"
+/* Returns 0 on success, 1 when no callback is registered for the id, and -1
+ * when the callback errored (message stashed in `__render_err`). */
 "function __render(id, w, h, frac)\n"
 "  __draw = {}\n"
+"  __render_err = nil\n"
 "  __cur_color = 0xFFFFFF\n"
 "  __render_val = math.floor((frac or 0)*127 + 0.5)\n"
 "  if rawget(preset, 'onLoad') then pcall(preset.onLoad) end\n"
@@ -143,8 +146,11 @@ static const char *PREAMBLE =
 "  local ctl = controls.get(id)\n"
 "  ctl.__setbounds({0,0,w,h})\n"
 "  local cb = __paint_cbs[id]\n"
-"  if cb then pcall(cb, ctl) end\n"
+"  if not cb then return 1 end\n"
+"  local ok, err = pcall(cb, ctl)\n"
+"  if not ok then __render_err = tostring(err) return -1 end\n"
 "  __draw_json = __serialize(__draw)\n"
+"  return 0\n"
 "end\n";
 
 static void install_print(lua_State *L, clua_writer w, void *ctx) {
@@ -158,8 +164,12 @@ lua_State *clua_new(clua_writer w, void *ctx) {
     lua_State *L = luaL_newstate();
     if (!L) return NULL;
     luaL_openlibs(L);
-    /* mock first, then real print so print wins */
-    (void)luaL_dostring(L, PREAMBLE);
+    /* mock first, then real print so print wins. A preamble failure would
+     * silently gut the mock — stash the error where the host can read it
+     * (via clua_global_string on `__preamble_err`). */
+    if (luaL_dostring(L, PREAMBLE) != LUA_OK) {
+        lua_setglobal(L, "__preamble_err"); /* pops the error message */
+    }
     install_print(L, w, ctx);
     /* stash the writer/ctx for error reporting */
     lua_pushlightuserdata(L, (void *)w);
@@ -213,8 +223,23 @@ int clua_render(lua_State *L, int id, double w, double h, double frac) {
     lua_pushnumber(L, w);
     lua_pushnumber(L, h);
     lua_pushnumber(L, frac);
-    if (lua_pcall(L, 4, 0, 0) != LUA_OK) { lua_pop(L, 1); return -1; }
-    return 0;
+    if (lua_pcall(L, 4, 1, 0) != LUA_OK) {
+        /* stash the error where the host reads callback errors from */
+        lua_setglobal(L, "__render_err"); /* pops the message */
+        return -1;
+    }
+    int status = (int)lua_tointeger(L, -1); /* 0 ok, 1 no callback, -1 error */
+    lua_pop(L, 1);
+    return status;
+}
+
+size_t clua_global_strlen(lua_State *L, const char *name) {
+    if (!L || !name) return 0;
+    lua_getglobal(L, name);
+    size_t len = 0;
+    if (lua_isstring(L, -1)) lua_tolstring(L, -1, &len);
+    lua_pop(L, 1);
+    return len;
 }
 
 int clua_global_string(lua_State *L, const char *name, char *out, size_t cap) {

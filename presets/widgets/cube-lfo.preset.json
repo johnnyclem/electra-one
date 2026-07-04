@@ -25,7 +25,8 @@
         {
           "message": {
             "type": "cc7",
-            "parameterNumber": 2
+            "parameterNumber": 2,
+            "deviceId": 1
           }
         }
       ],
@@ -66,7 +67,8 @@
         {
           "message": {
             "type": "cc7",
-            "parameterNumber": 5
+            "parameterNumber": 5,
+            "deviceId": 1
           }
         }
       ],
@@ -87,7 +89,8 @@
         {
           "message": {
             "type": "cc7",
-            "parameterNumber": 6
+            "parameterNumber": 6,
+            "deviceId": 1
           }
         }
       ],
@@ -108,7 +111,8 @@
         {
           "message": {
             "type": "cc7",
-            "parameterNumber": 9
+            "parameterNumber": 9,
+            "deviceId": 1
           }
         }
       ],
@@ -129,7 +133,8 @@
         {
           "message": {
             "type": "cc7",
-            "parameterNumber": 10
+            "parameterNumber": 10,
+            "deviceId": 1
           }
         }
       ],

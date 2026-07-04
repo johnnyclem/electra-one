@@ -92,4 +92,24 @@ private let mfr: [UInt8] = [0x00, 0x21, 0x45]
             Issue.record("too short should be unknown"); return
         }
     }
+
+    @Test func classifySixByteFrameIsUnknownNotACrash() {
+        // F0 00 21 45 01 F7 has valid SOX/manufacturer/EOX but no code/resource
+        // byte — the shortest valid message is 7 bytes. Must not trap.
+        guard case .unknown = E1Proto.classify([sox] + mfr + [0x01, eox]) else {
+            Issue.record("6-byte frame should be unknown"); return
+        }
+    }
+
+    @Test func uploadsAreSevenBitSafe() {
+        // SysEx data bytes must be < 0x80; non-ASCII characters are replaced,
+        // never emitted as multi-byte UTF-8 (mirrors lib/protocol.js).
+        let preset = E1Proto.presetUpload(json: "{\"name\":\"Café — ✓\"}")
+        #expect(preset.dropFirst().dropLast().allSatisfy { $0 < 0x80 })
+        let lua = E1Proto.luaUpload(source: "print('naïve 中')")
+        #expect(lua.dropFirst().dropLast().allSatisfy { $0 < 0x80 })
+        // Pure-ASCII bodies still round-trip byte-for-byte.
+        let plain = E1Proto.luaUpload(source: "print(1)")
+        #expect(String(bytes: plain[6..<(plain.count - 1)], encoding: .utf8) == "print(1)")
+    }
 }

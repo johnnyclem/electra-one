@@ -35,6 +35,12 @@ let package = Package(
             name: "ElectraKitTests",
             dependencies: ["ElectraKit", "LuaKit"]
         ),
+        // UI-logic tests for the app layer: the editor↔document Lua sync and
+        // the UI-driven Lua generation flows (Custom controls, script buttons).
+        .testTarget(
+            name: "ElectraOneAppTests",
+            dependencies: ["ElectraOneApp", "ElectraKit", "LuaKit"]
+        ),
     ],
     swiftLanguageModes: [.v5]
 )

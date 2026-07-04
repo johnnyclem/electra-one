@@ -53,9 +53,7 @@ struct LuaCodeView: NSViewRepresentable {
         // aqua our explicit colors render exactly as set.
         let lightAppearance = NSAppearance(named: .aqua)
         textView.appearance = lightAppearance
-        if #available(macOS 14.0, *) {
-            textView.usesAdaptiveColorMappingForDarkAppearance = false
-        }
+        textView.usesAdaptiveColorMappingForDarkAppearance = false // available since 10.14
         textView.typingAttributes = [.font: LuaTheme.font, .foregroundColor: LuaTheme.plain]
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
@@ -107,18 +105,24 @@ struct LuaCodeView: NSViewRepresentable {
     }
 
     func updateNSView(_ host: NSView, context: Context) {
+        // Re-point the coordinator at the latest struct value so its delegate
+        // callbacks write through the current Binding, not the first render's.
+        context.coordinator.parent = self
         guard let textView = context.coordinator.textView else { return }
         if textView.string != text {
             let sel = textView.selectedRange()
             textView.string = text
             LuaHighlighter.apply(to: textView)
-            textView.setSelectedRange(NSRange(location: min(sel.location, (text as NSString).length), length: 0))
+            // Preserve the selection (clamped) rather than collapsing it.
+            let len = (text as NSString).length
+            let loc = min(sel.location, len)
+            textView.setSelectedRange(NSRange(location: loc, length: min(sel.length, len - loc)))
         }
         context.coordinator.gutter?.needsDisplay = true
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
-        let parent: LuaCodeView
+        var parent: LuaCodeView
         weak var gutter: LineNumberGutter?
         weak var textView: NSTextView?
         var scrollObserver: NSObjectProtocol?
@@ -229,11 +233,25 @@ enum LuaHighlighter {
 
             if isDigit(c) || (c == 0x2E && i + 1 < n && isDigit(s.character(at: i + 1))) {
                 var j = i + 1
+                var isHex = false
+                // 0x / 0X prefix — only then are hex digits part of the number.
+                if c == 0x30, j < n, s.character(at: j) == 0x78 || s.character(at: j) == 0x58 {
+                    isHex = true
+                    j += 1
+                }
                 while j < n {
                     let cj = s.character(at: j)
-                    if isDigit(cj) || cj == 0x2E || cj == 0x78 || cj == 0x58
-                        || (cj >= 65 && cj <= 70) || (cj >= 97 && cj <= 102)
-                        || cj == 0x65 || cj == 0x45 || cj == 0x2B || cj == 0x2D { j += 1 } else { break }
+                    if isDigit(cj) || cj == 0x2E
+                        || (isHex && ((cj >= 65 && cj <= 70) || (cj >= 97 && cj <= 102))) {
+                        j += 1
+                    } else if !isHex, cj == 0x65 || cj == 0x45 {
+                        // Exponent marker; a sign is only valid immediately after
+                        // it (so `1-2` no longer highlights as one number).
+                        j += 1
+                        if j < n, s.character(at: j) == 0x2B || s.character(at: j) == 0x2D { j += 1 }
+                    } else {
+                        break
+                    }
                 }
                 out.append(Tok(range: NSRange(location: i, length: j - i), color: LuaTheme.number))
                 i = j
@@ -331,7 +349,9 @@ final class LineNumberGutter: NSView {
         let glyphRange = layout.glyphRange(forBoundingRect: visible, in: container)
         let firstChar = layout.characterIndexForGlyph(at: glyphRange.location)
         if firstChar > 0 {
-            lineNo += ns.substring(to: firstChar).reduce(0) { $0 + ($1 == "\n" ? 1 : 0) }
+            // Count newlines in place — substring(to:) would copy everything
+            // above the viewport on every gutter redraw.
+            for k in 0..<firstChar where ns.character(at: k) == 0x0A { lineNo += 1 }
         }
         charIndex = firstChar
 

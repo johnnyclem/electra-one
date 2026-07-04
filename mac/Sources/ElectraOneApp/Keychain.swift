@@ -5,6 +5,8 @@ import Security
 /// (local servers like Ollama need none), entered by the user in Settings and
 /// stored securely; the app never ships a key.
 enum Keychain {
+    // Must stay in sync with BUNDLE_ID in mac/build-app.sh — changing either
+    // one alone strands users' stored API keys.
     private static let service = "one.electra.companion"
     private static let account = "ai-api-key"
 

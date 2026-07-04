@@ -78,6 +78,33 @@ import Testing
         #expect(vals.first?.parameterNumber == 7)
     }
 
+    @Test func labelSpanWidthIncludesInterSlotGap() {
+        let doc = PresetDocument.load(fileText: Self.eproj)!
+        let groups = doc.root["groups"] as? [[String: Any]] ?? []
+        let section = groups.first { ($0["name"] as? String) == "Section" }
+        let bounds = section?["bounds"] as? [Int]
+        // span 2 → slotWidth + 1×pitchX = 175 + 196, not 2×175.
+        #expect(bounds?[2] == 371)
+    }
+
+    @Test func fallbackReferenceIdsDoNotCollide() {
+        // Tile B has no explicit `reference`; its fallback id must be allocated
+        // above the highest explicit one (2), never colliding with it.
+        let proj = """
+        {"schemaVersion": 2, "name": "P",
+         "tiles": [
+           {"slotId": 0, "reference": 2, "type": "fader", "name": "A"},
+           {"slotId": 1, "type": "fader", "name": "B"},
+           {"slotId": 2, "type": "fader", "name": "C"}
+         ]}
+        """
+        let doc = PresetDocument.load(fileText: proj)!
+        let ids = doc.allControls().map(\.id)
+        #expect(ids.count == 3)
+        #expect(Set(ids).count == ids.count)   // all unique
+        #expect(ids.contains(2))               // explicit id preserved
+    }
+
     @Test func plainPresetLoadsUnconverted() {
         let preset = "{\"name\":\"Plain\",\"controls\":[{\"id\":1,\"type\":\"fader\"}]}"
         let doc = PresetDocument.load(fileText: preset)
