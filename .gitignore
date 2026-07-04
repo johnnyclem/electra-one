@@ -46,3 +46,4 @@ node_modules/
 mac/.build/
 mac/ElectraOne.app/
 *.swiftpm
+.vercel

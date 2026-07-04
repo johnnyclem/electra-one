@@ -114,15 +114,21 @@ public final class MIDITransport: E1TransportProtocol, @unchecked Sendable {
 
     // ── Lifecycle ───────────────────────────────────────────────────────────
 
-    @discardableResult
-    public func connect() throws -> PortNames {
-        if connected, let p = portNames { return p }
+    /// Create the MIDI client and ports once and keep them for the process
+    /// lifetime. CoreMIDI only refreshes a process's endpoint list via
+    /// notifications delivered to a live client — creating and disposing a
+    /// client per connect attempt left later `MIDIGetNumberOfSources()` calls
+    /// looking at a stale snapshot, so a device plugged in after the first
+    /// failed attempt was never seen ("Retry" could never succeed).
+    private func ensureClient() throws {
+        lock.lock()
+        let existing = client
+        lock.unlock()
+        if existing != 0 { return }
 
         var c = MIDIClientRef()
         var ip = MIDIPortRef()
         var op = MIDIPortRef()
-        // Tear down whatever was created so far when a later step fails, so a
-        // failed connect never leaks the client/ports.
         func cleanup() {
             if ip != 0 { MIDIPortDispose(ip) }
             if op != 0 { MIDIPortDispose(op) }
@@ -140,16 +146,26 @@ public final class MIDITransport: E1TransportProtocol, @unchecked Sendable {
         st = MIDIOutputPortCreate(c, "ElectraOneOut" as CFString, &op)
         guard st == noErr else { cleanup(); throw E1Error.midi(st, "MIDIOutputPortCreate") }
 
+        lock.lock()
+        client = c; inPort = ip; outPort = op
+        lock.unlock()
+    }
+
+    @discardableResult
+    public func connect() throws -> PortNames {
+        if connected, let p = portNames { return p }
+
+        try ensureClient()
+
         guard let (src, srcName) = bestSource(), let (dst, dstName) = bestDest() else {
-            cleanup(); throw E1Error.notFound
+            throw E1Error.notFound
         }
 
-        st = MIDIPortConnectSource(ip, src, nil)
-        guard st == noErr else { cleanup(); throw E1Error.midi(st, "MIDIPortConnectSource") }
+        let st = MIDIPortConnectSource(inPort, src, nil)
+        guard st == noErr else { throw E1Error.midi(st, "MIDIPortConnectSource") }
 
         let names = PortNames(input: srcName, output: dstName)
         lock.lock()
-        client = c; inPort = ip; outPort = op
         source = src; dest = dst
         _portNames = names
         _connected = true
@@ -159,11 +175,10 @@ public final class MIDITransport: E1TransportProtocol, @unchecked Sendable {
 
     public func disconnect() {
         if source != 0 { MIDIPortDisconnectSource(inPort, source) }
-        if inPort != 0 { MIDIPortDispose(inPort) }
-        if outPort != 0 { MIDIPortDispose(outPort) }
-        if client != 0 { MIDIClientDispose(client) }
+        // Keep the client and ports alive — disposing them would freeze this
+        // process's view of the endpoint list (see ensureClient).
         lock.lock()
-        inPort = 0; outPort = 0; client = 0; source = 0; dest = 0
+        source = 0; dest = 0
         _connected = false
         buffer = []
         let fail = waiterFail
@@ -234,7 +249,9 @@ public final class MIDITransport: E1TransportProtocol, @unchecked Sendable {
     private func sendSysex(_ bytes: [UInt8]) throws {
         // The request struct and payload must outlive this call — CoreMIDI
         // sends asynchronously and frees nothing. The completion proc
-        // deallocates both.
+        // deallocates both. CoreMIDI advances `data`/`bytesToSend` as the send
+        // progresses, so by completion `data` points past the end of the
+        // buffer — the original pointer must travel via completionRefCon.
         let data = UnsafeMutablePointer<UInt8>.allocate(capacity: max(1, bytes.count))
         data.update(from: bytes, count: bytes.count)
         let request = UnsafeMutablePointer<MIDISysexSendRequest>.allocate(capacity: 1)
@@ -245,10 +262,11 @@ public final class MIDITransport: E1TransportProtocol, @unchecked Sendable {
             complete: false,
             reserved: (0, 0, 0),
             completionProc: { req in
-                UnsafeMutablePointer(mutating: req.pointee.data).deallocate()
+                req.pointee.completionRefCon?
+                    .assumingMemoryBound(to: UInt8.self).deallocate()
                 req.deallocate()
             },
-            completionRefCon: nil))
+            completionRefCon: UnsafeMutableRawPointer(data)))
 
         let st = MIDISendSysex(request)
         guard st == noErr else {
