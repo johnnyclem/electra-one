@@ -320,6 +320,14 @@ public struct PresetDocument {
         guard var controls = root["controls"] as? [[String: Any]] else { return }
         controls.removeAll { ($0["id"] as? Int) == id }
         root["controls"] = controls
+        // A connector with a dangling endpoint is meaningless — drop them along
+        // with the control.
+        if var conns = root[Self.connectorsKey] as? [[String: Any]] {
+            conns.removeAll {
+                ($0["fromControlId"] as? Int) == id || ($0["toControlId"] as? Int) == id
+            }
+            root[Self.connectorsKey] = conns
+        }
     }
 
     /// Duplicate a control (all fields preserved, incl. ADSR values), offset
@@ -557,11 +565,118 @@ public struct PresetDocument {
         root["pages"] = pages
     }
 
+    // ── Connectors (editor-only board arrows) ────────────────────────────────
+
+    /// Where a connector arrow points: another control, or a page (a "sub-page
+    /// link" — e.g. a pad that conceptually opens page 3).
+    public enum ConnectorTarget: Hashable, Sendable {
+        case control(Int)
+        case page(Int)
+    }
+
+    /// A FigJam/OmniGraffle-style arrow on the design canvas. Connectors are an
+    /// editor annotation, not part of the Electra preset schema — they persist
+    /// in saved files but are stripped from device uploads (see `jsonString`).
+    public struct Connector: Identifiable, Hashable {
+        public var id: Int
+        public var fromControlId: Int
+        public var target: ConnectorTarget
+        public var label: String
+        public var colorHex: String
+    }
+
+    static let connectorsKey = "connectors"
+
+    public var connectors: [Connector] {
+        (root[Self.connectorsKey] as? [[String: Any]] ?? []).compactMap { c in
+            guard let id = c["id"] as? Int,
+                  let from = c["fromControlId"] as? Int else { return nil }
+            let target: ConnectorTarget
+            if let t = c["toControlId"] as? Int { target = .control(t) }
+            else if let p = c["toPageId"] as? Int { target = .page(p) }
+            else { return nil }
+            return Connector(id: id, fromControlId: from, target: target,
+                             label: c["label"] as? String ?? "",
+                             colorHex: c["color"] as? String ?? "FFFFFF")
+        }
+    }
+
+    /// Connectors that render on a page: those whose source control lives there.
+    public func connectors(onPage pageId: Int) -> [Connector] {
+        let ids = Set(controls(onPage: pageId).map(\.id))
+        return connectors.filter { ids.contains($0.fromControlId) }
+    }
+
+    public func connector(id: Int) -> Connector? {
+        connectors.first { $0.id == id }
+    }
+
+    /// Add a connector arrow. Exact duplicates (same source and target) return
+    /// the existing connector's id instead of stacking a second arrow.
+    @discardableResult
+    public mutating func addConnector(fromControlId: Int, to target: ConnectorTarget,
+                                      colorHex: String = "FFFFFF") -> Int {
+        if let existing = connectors.first(where: { $0.fromControlId == fromControlId && $0.target == target }) {
+            return existing.id
+        }
+        var arr = root[Self.connectorsKey] as? [[String: Any]] ?? []
+        let newId = (arr.compactMap { $0["id"] as? Int }.max() ?? 0) + 1
+        var c: [String: Any] = ["id": newId, "fromControlId": fromControlId,
+                                "label": "", "color": colorHex]
+        switch target {
+        case .control(let t): c["toControlId"] = t
+        case .page(let p):    c["toPageId"] = p
+        }
+        arr.append(c)
+        root[Self.connectorsKey] = arr
+        return newId
+    }
+
+    public mutating func removeConnector(id: Int) {
+        guard var arr = root[Self.connectorsKey] as? [[String: Any]] else { return }
+        arr.removeAll { ($0["id"] as? Int) == id }
+        root[Self.connectorsKey] = arr
+    }
+
+    private mutating func mutateConnector(id: Int, _ body: (inout [String: Any]) -> Void) {
+        guard var arr = root[Self.connectorsKey] as? [[String: Any]] else { return }
+        for i in arr.indices where (arr[i]["id"] as? Int) == id {
+            var c = arr[i]
+            body(&c)
+            arr[i] = c
+            break
+        }
+        root[Self.connectorsKey] = arr
+    }
+
+    public mutating func setConnectorLabel(id: Int, _ label: String) {
+        mutateConnector(id: id) { $0["label"] = label }
+    }
+
+    public mutating func setConnectorColor(id: Int, hex: String) {
+        mutateConnector(id: id) { $0["color"] = hex }
+    }
+
+    /// Flip a control→control connector's direction. Page links have no
+    /// meaningful reverse, so they're left untouched.
+    public mutating func reverseConnector(id: Int) {
+        mutateConnector(id: id) { c in
+            guard let from = c["fromControlId"] as? Int,
+                  let to = c["toControlId"] as? Int else { return }
+            c["fromControlId"] = to
+            c["toControlId"] = from
+        }
+    }
+
     // ── Serialization ──────────────────────────────────────────────────────
 
-    public func jsonString(pretty: Bool = false) -> String {
+    /// `forDevice: true` strips editor-only keys (connectors) so the upload is
+    /// exactly the schema the firmware knows; file saves keep everything.
+    public func jsonString(pretty: Bool = false, forDevice: Bool = false) -> String {
+        var obj = root
+        if forDevice { obj.removeValue(forKey: Self.connectorsKey) }
         let opts: JSONSerialization.WritingOptions = pretty ? [.prettyPrinted, .sortedKeys] : []
-        guard let data = try? JSONSerialization.data(withJSONObject: root, options: opts),
+        guard let data = try? JSONSerialization.data(withJSONObject: obj, options: opts),
               let s = String(data: data, encoding: .utf8) else { return "{}" }
         return s
     }

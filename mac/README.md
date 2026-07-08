@@ -12,6 +12,14 @@ CoreMIDI (no Node required).
 - **Visual editor** — a black "screen" canvas draws each control at its real
   `bounds` with its color and a type-specific graphic (fader bar, pad, list).
   Page tabs switch pages. Drag a control to reposition it.
+- **Connector arrows** — FigJam/OmniGraffle-style arrows on the canvas. Hover
+  (or select) a control and drag from an edge dot to arrow another control, or
+  use the inspector's "Link to Page…" to draw an arrow to a floating page pill
+  (click the pill to jump to that page). Select an arrow to edit its label and
+  color, reverse it, or delete it. Connectors are editor annotations: they save
+  into the preset `.json` under a `connectors` key and round-trip through
+  files, but are stripped from device uploads (the firmware doesn't know the
+  key), and deleting a control removes its arrows.
 - **Inspector** — select a control to edit its name, color (Electra palette),
   type, MIDI message (cc7/cc14/nrpn/note/program/…), parameter number, and
   exact position. Add/delete controls. Rename the preset and pages.

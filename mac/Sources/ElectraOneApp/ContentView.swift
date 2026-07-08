@@ -318,6 +318,14 @@ private struct DeviceCanvas: View {
     // Marquee selection.
     @State private var marqueeStart: CGPoint?
     @State private var marqueeRect: CGRect?
+    // Connector drawing: drag from an edge handle rubber-bands an arrow.
+    @State private var hoveredControlId: Int?
+    @State private var connectFromId: Int?
+    @State private var connectPoint: CGPoint?
+
+    /// Named coordinate space of the screen ZStack, so handle drags report
+    /// locations in canvas coordinates rather than their own tiny frames.
+    static let canvasSpace = "e1screen"
 
     private let screenW = PresetDocument.screenWidth
     private let screenH = PresetDocument.screenHeight
@@ -376,11 +384,19 @@ private struct DeviceCanvas: View {
         ZStack(alignment: .topLeading) {
             Color.black
                 .contentShape(Rectangle())
-                .onTapGesture { model.selectedControlId = nil; multiSelection.removeAll() }
+                .onTapGesture { model.selectedControlId = nil; model.selectedConnectorId = nil; multiSelection.removeAll() }
                 .gesture(marqueeGesture(scale: scale))
 
             if showGrid { SlotGridOverlay(scale: scale) }
             ControlSetBands(scale: scale)
+
+            // Arrows sit under the controls so they never block control drags;
+            // taps in the gaps between nodes still select them.
+            ConnectorLayer(scale: scale, dragIDs: dragIDs, dragOffset: dragOffset) { id in
+                multiSelection.removeAll()
+                model.selectedControlId = nil
+                model.selectedConnectorId = id
+            }
 
             ForEach(model.currentControls) { control in
                 RichControl(
@@ -390,6 +406,10 @@ private struct DeviceCanvas: View {
                     liveOffset: dragIDs.contains(control.id) ? dragOffset : .zero,
                     onSelect: { select(control.id) },
                     onRun: { model.runScriptControl(id: control.id) },
+                    onHover: { inside in
+                        if inside { hoveredControlId = control.id }
+                        else if hoveredControlId == control.id { hoveredControlId = nil }
+                    },
                     onDragChanged: { t in
                         if dragIDs.isEmpty { dragIDs = group(for: control.id) }
                         dragOffset = t
@@ -400,6 +420,21 @@ private struct DeviceCanvas: View {
                         dragIDs = []; dragOffset = .zero
                     })
             }
+
+            // Edge handles on the hovered/selected control. While a connect
+            // drag is live, key the handles to its source so the gesture's view
+            // survives hover changes (removing it would cancel the drag).
+            if dragIDs.isEmpty,
+               let id = connectFromId ?? handleControlId,
+               let c = model.currentControls.first(where: { $0.id == id }) {
+                AnchorHandles(
+                    rect: scaledRect(c, scale: scale),
+                    onHover: { if $0 { hoveredControlId = id } },
+                    onDragChanged: { p in connectFromId = id; connectPoint = p },
+                    onDragEnded: { p in endConnect(at: p, scale: scale) })
+            }
+
+            connectRubberBand(scale: scale)
 
             if let r = marqueeRect {
                 Rectangle().fill(ElectraTheme.accent.opacity(0.12))
@@ -415,6 +450,57 @@ private struct DeviceCanvas: View {
                     .frame(width: screenW * scale, height: screenH * scale)
             }
         }
+        .coordinateSpace(name: Self.canvasSpace)
+    }
+
+    /// Which control shows connector handles: the hovered one, else a single
+    /// canvas selection.
+    private var handleControlId: Int? {
+        hoveredControlId ?? (multiSelection.count == 1 ? multiSelection.first : nil)
+    }
+
+    private func scaledRect(_ c: PresetDocument.Control, scale: Double) -> CGRect {
+        let off = dragIDs.contains(c.id) ? dragOffset : .zero
+        return CGRect(x: c.x * scale + off.width, y: c.y * scale + off.height,
+                      width: c.w * scale, height: c.h * scale)
+    }
+
+    private func controlAt(_ p: CGPoint, scale: Double, excluding: Int) -> Int? {
+        model.currentControls.first {
+            $0.id != excluding && scaledRect($0, scale: scale).contains(p)
+        }?.id
+    }
+
+    /// The live arrow while dragging from a handle, plus a highlight on the
+    /// control it would land on.
+    @ViewBuilder private func connectRubberBand(scale: Double) -> some View {
+        if let fromId = connectFromId, let p = connectPoint,
+           let src = model.currentControls.first(where: { $0.id == fromId }) {
+            let fromRect = scaledRect(src, scale: scale)
+            let (a, dirA) = ConnectorMath.anchor(on: fromRect, toward: p)
+            let d = hypot(p.x - a.x, p.y - a.y)
+            let dirB = d < 1 ? CGVector(dx: -dirA.dx, dy: -dirA.dy)
+                             : CGVector(dx: (a.x - p.x) / d, dy: (a.y - p.y) / d)
+            ConnectorMath.path(from: a, dirA: dirA, to: p, dirB: dirB)
+                .stroke(ElectraTheme.accent, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [5, 4]))
+                .allowsHitTesting(false)
+            if let targetId = controlAt(p, scale: scale, excluding: fromId),
+               let t = model.currentControls.first(where: { $0.id == targetId }) {
+                let r = scaledRect(t, scale: scale)
+                RoundedRectangle(cornerRadius: ElectraTheme.controlCornerRadius)
+                    .stroke(ElectraTheme.accent, lineWidth: 2)
+                    .frame(width: r.width, height: r.height)
+                    .position(x: r.midX, y: r.midY)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func endConnect(at p: CGPoint, scale: Double) {
+        defer { connectFromId = nil; connectPoint = nil }
+        guard let from = connectFromId,
+              let target = controlAt(p, scale: scale, excluding: from) else { return }
+        model.addConnector(from: from, to: .control(target))
     }
 
     private func marqueeGesture(scale: Double) -> some Gesture {
@@ -433,6 +519,7 @@ private struct DeviceCanvas: View {
                     }.map(\.id)
                     multiSelection = Set(hits)
                     model.selectedControlId = hits.count == 1 ? hits.first : nil
+                    model.selectedConnectorId = nil
                 }
                 marqueeStart = nil; marqueeRect = nil
             }
@@ -443,6 +530,7 @@ private struct DeviceCanvas: View {
     }
 
     private func select(_ id: Int) {
+        model.selectedConnectorId = nil
         if NSEvent.modifierFlags.contains(.command) {
             if multiSelection.contains(id) { multiSelection.remove(id) } else { multiSelection.insert(id) }
             model.selectedControlId = multiSelection.count == 1 ? multiSelection.first : nil
@@ -488,6 +576,217 @@ private struct ControlSetBands: View {
     }
 }
 
+// MARK: - Connectors (board arrows)
+
+/// Shared curve/arrow geometry for connector rendering. All coordinates are in
+/// the scaled canvas space (`DeviceCanvas.canvasSpace`).
+enum ConnectorMath {
+    /// The point on `rect`'s edge facing `toward`, plus the outward normal of
+    /// that edge — horizontal edges win when the target is mostly sideways.
+    static func anchor(on rect: CGRect, toward p: CGPoint) -> (point: CGPoint, dir: CGVector) {
+        let dx = p.x - rect.midX, dy = p.y - rect.midY
+        if abs(dx) >= abs(dy) {
+            return dx >= 0
+                ? (CGPoint(x: rect.maxX, y: rect.midY), CGVector(dx: 1, dy: 0))
+                : (CGPoint(x: rect.minX, y: rect.midY), CGVector(dx: -1, dy: 0))
+        } else {
+            return dy >= 0
+                ? (CGPoint(x: rect.midX, y: rect.maxY), CGVector(dx: 0, dy: 1))
+                : (CGPoint(x: rect.midX, y: rect.minY), CGVector(dx: 0, dy: -1))
+        }
+    }
+
+    /// How far the curve's control points extend along each node's exit normal.
+    private static func lead(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
+        let dist = hypot(b.x - a.x, b.y - a.y)
+        return min(90, max(24, dist * 0.4))
+    }
+
+    /// A cubic curve leaving `a` along `dirA` and arriving at `b` against `dirB`
+    /// (both are outward edge normals) — the classic diagramming S-curve.
+    static func path(from a: CGPoint, dirA: CGVector, to b: CGPoint, dirB: CGVector) -> Path {
+        let l = lead(a, b)
+        var p = Path()
+        p.move(to: a)
+        p.addCurve(to: b,
+                   control1: CGPoint(x: a.x + dirA.dx * l, y: a.y + dirA.dy * l),
+                   control2: CGPoint(x: b.x + dirB.dx * l, y: b.y + dirB.dy * l))
+        return p
+    }
+
+    /// Filled triangle arrowhead landing at `tip`; `outward` is the target
+    /// edge's outward normal (the arrow flies in against it).
+    static func arrowhead(at tip: CGPoint, outward: CGVector, size: CGFloat = 9) -> Path {
+        let perp = CGVector(dx: -outward.dy, dy: outward.dx)
+        var p = Path()
+        p.move(to: tip)
+        p.addLine(to: CGPoint(x: tip.x + outward.dx * size + perp.dx * size * 0.55,
+                              y: tip.y + outward.dy * size + perp.dy * size * 0.55))
+        p.addLine(to: CGPoint(x: tip.x + outward.dx * size - perp.dx * size * 0.55,
+                              y: tip.y + outward.dy * size - perp.dy * size * 0.55))
+        p.closeSubpath()
+        return p
+    }
+
+    /// The cubic's point at t = 0.5, where the label sits.
+    static func midpoint(from a: CGPoint, dirA: CGVector, to b: CGPoint, dirB: CGVector) -> CGPoint {
+        let l = lead(a, b)
+        let c1 = CGPoint(x: a.x + dirA.dx * l, y: a.y + dirA.dy * l)
+        let c2 = CGPoint(x: b.x + dirB.dx * l, y: b.y + dirB.dy * l)
+        return CGPoint(x: (a.x + 3 * c1.x + 3 * c2.x + b.x) / 8,
+                       y: (a.y + 3 * c1.y + 3 * c2.y + b.y) / 8)
+    }
+}
+
+/// All connector arrows on the current page. Control→control arrows run node to
+/// node; control→page arrows land on a floating page pill that navigates when
+/// clicked. Arrows track live drags so they follow controls being moved.
+private struct ConnectorLayer: View {
+    @EnvironmentObject var model: AppModel
+    let scale: Double
+    let dragIDs: Set<Int>
+    let dragOffset: CGSize
+    let onSelect: (Int) -> Void
+
+    var body: some View {
+        let rects = Dictionary(model.currentControls.map { ($0.id, rect(for: $0)) },
+                               uniquingKeysWith: { first, _ in first })
+        ZStack(alignment: .topLeading) {
+            ForEach(model.currentConnectors) { conn in
+                arrow(conn, rects: rects)
+            }
+        }
+    }
+
+    @ViewBuilder private func arrow(_ conn: PresetDocument.Connector, rects: [Int: CGRect]) -> some View {
+        if let from = rects[conn.fromControlId] {
+            switch conn.target {
+            case .control(let t):
+                if let to = rects[t] {
+                    ConnectorArrow(connector: conn, fromRect: from, toRect: to, pillName: nil,
+                                   selected: model.selectedConnectorId == conn.id,
+                                   onSelect: { onSelect(conn.id) }, onFollow: {})
+                }
+            case .page(let pid):
+                let name = model.document?.pages.first { $0.id == pid }?.name ?? "Page \(pid)"
+                ConnectorArrow(connector: conn, fromRect: from,
+                               toRect: pillRect(from: from, name: name), pillName: name,
+                               selected: model.selectedConnectorId == conn.id,
+                               onSelect: { onSelect(conn.id) },
+                               onFollow: { model.followConnector(conn) })
+            }
+        }
+    }
+
+    private func rect(for c: PresetDocument.Control) -> CGRect {
+        let off = dragIDs.contains(c.id) ? dragOffset : .zero
+        return CGRect(x: c.x * scale + off.width, y: c.y * scale + off.height,
+                      width: c.w * scale, height: c.h * scale)
+    }
+
+    /// A page pill floats beside its source control — to the right when there's
+    /// room, else to the left — and stays inside the canvas vertically.
+    private func pillRect(from: CGRect, name: String) -> CGRect {
+        let w = min(160, max(64, 34 + CGFloat(name.count) * 7))
+        let h: CGFloat = 24
+        let gap: CGFloat = 56
+        var x = from.maxX + gap
+        if x + w > SlotGeometry.canvasWidth * scale - 8 { x = from.minX - gap - w }
+        let y = min(max(4, from.midY - h / 2), SlotGeometry.canvasHeight * scale - h - 4)
+        return CGRect(x: x, y: y, width: w, height: h)
+    }
+}
+
+/// One connector: curve + arrowhead, optional midpoint label, optional page
+/// pill at the target end. Only the stroke (widened) and the pill hit-test.
+private struct ConnectorArrow: View {
+    let connector: PresetDocument.Connector
+    let fromRect: CGRect
+    let toRect: CGRect
+    let pillName: String?
+    let selected: Bool
+    let onSelect: () -> Void
+    let onFollow: () -> Void
+
+    var body: some View {
+        let (a, dirA) = ConnectorMath.anchor(on: fromRect, toward: CGPoint(x: toRect.midX, y: toRect.midY))
+        let (b, dirB) = ConnectorMath.anchor(on: toRect, toward: CGPoint(x: fromRect.midX, y: fromRect.midY))
+        let curve = ConnectorMath.path(from: a, dirA: dirA, to: b, dirB: dirB)
+        let color = selected ? Color.white : Color(electraHex: connector.colorHex)
+
+        ZStack(alignment: .topLeading) {
+            curve.stroke(color.opacity(selected ? 1 : 0.85),
+                         style: StrokeStyle(lineWidth: selected ? 2.5 : 1.5, lineCap: .round))
+                .contentShape(curve.strokedPath(StrokeStyle(lineWidth: 14)))
+                .onTapGesture { onSelect() }
+
+            ConnectorMath.arrowhead(at: b, outward: dirB)
+                .fill(color)
+                .allowsHitTesting(false)
+
+            if !connector.label.isEmpty {
+                Text(connector.label)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Capsule().fill(ElectraTheme.surfaceSecondary))
+                    .overlay(Capsule().stroke(color.opacity(0.5), lineWidth: 1))
+                    .position(ConnectorMath.midpoint(from: a, dirA: dirA, to: b, dirB: dirB))
+                    .allowsHitTesting(false)
+            }
+
+            if let name = pillName {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.right.square.fill").font(.system(size: 10))
+                    Text(name).font(.system(size: 10, weight: .semibold)).lineLimit(1)
+                }
+                .foregroundStyle(color)
+                .frame(width: toRect.width, height: toRect.height)
+                .background(Capsule().fill(ElectraTheme.surfaceSecondary))
+                .overlay(Capsule().stroke(color.opacity(0.7), lineWidth: 1))
+                .contentShape(Capsule())
+                .onTapGesture { onFollow() }
+                .position(x: toRect.midX, y: toRect.midY)
+                .help("Go to \(name)")
+            }
+        }
+    }
+}
+
+/// Four edge dots on a control; dragging from one rubber-bands a new connector.
+/// Reports drag locations in the canvas coordinate space.
+private struct AnchorHandles: View {
+    let rect: CGRect
+    let onHover: (Bool) -> Void
+    let onDragChanged: (CGPoint) -> Void
+    let onDragEnded: (CGPoint) -> Void
+
+    private var points: [CGPoint] {
+        [CGPoint(x: rect.midX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.midY),
+         CGPoint(x: rect.midX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.midY)]
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(points.enumerated()), id: \.offset) { _, pt in
+                Circle()
+                    .fill(ElectraTheme.accent)
+                    .overlay(Circle().stroke(.white, lineWidth: 1))
+                    .frame(width: 9, height: 9)
+                    .contentShape(Circle().inset(by: -5))
+                    .position(pt)
+                    .gesture(
+                        DragGesture(minimumDistance: 0, coordinateSpace: .named(DeviceCanvas.canvasSpace))
+                            .onChanged { onDragChanged($0.location) }
+                            .onEnded { onDragEnded($0.location) }
+                    )
+                    .onHover { onHover($0) }
+                    .help("Drag to connect")
+            }
+        }
+    }
+}
+
 // MARK: - Control
 
 private struct RichControl: View {
@@ -498,6 +797,7 @@ private struct RichControl: View {
     let liveOffset: CGSize          // applied to the whole selection during a group drag
     let onSelect: () -> Void
     var onRun: () -> Void = {}
+    var onHover: (Bool) -> Void = { _ in }   // canvas tracks hover for connector handles
     let onDragChanged: (CGSize) -> Void
     let onDragEnded: (CGSize) -> Void
 
@@ -519,6 +819,7 @@ private struct RichControl: View {
                     .onChanged { onDragChanged($0.translation) }
                     .onEnded { onDragEnded($0.translation) }
             )
+            .onHover { onHover($0) }
     }
 
     @ViewBuilder private var cell: some View {
@@ -867,6 +1168,8 @@ private struct Inspector: View {
             VStack(alignment: .leading, spacing: 14) {
                 if multiSelection.count > 1 {
                     multiInspector
+                } else if let k = model.selectedConnector {
+                    connectorInspector(k)
                 } else if let c = model.selectedControl {
                     controlInspector(c)
                 } else {
@@ -992,6 +1295,92 @@ private struct Inspector: View {
         HStack {
             numField("W", c.w) { model.setControlBounds(c.id, x: c.x, y: c.y, w: $0, h: c.h) }
             numField("H", c.h) { model.setControlBounds(c.id, x: c.x, y: c.y, w: c.w, h: $0) }
+        }
+        Divider()
+        connectSection(c)
+    }
+
+    /// Board arrows for a control: draw new ones from the canvas handles, link
+    /// to a sub-page from here, and jump to any existing connector.
+    @ViewBuilder private func connectSection(_ c: PresetDocument.Control) -> some View {
+        Text("CONNECT").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
+        Text("Drag from a dot on the control's edge to arrow another control.")
+            .font(.caption).foregroundStyle(ElectraTheme.textTertiary).fixedSize(horizontal: false, vertical: true)
+        let otherPages = (model.document?.pages ?? []).filter { $0.id != model.currentPageId }
+        if !otherPages.isEmpty {
+            Menu {
+                ForEach(otherPages) { page in
+                    Button(page.name) { model.addConnector(from: c.id, to: .page(page.id)) }
+                }
+            } label: {
+                Label("Link to Page…", systemImage: "arrow.turn.up.right")
+            }
+            .menuStyle(.borderlessButton)
+        }
+        let related = model.currentConnectors.filter {
+            $0.fromControlId == c.id || $0.target == .control(c.id)
+        }
+        ForEach(related) { k in
+            Button {
+                model.selectedControlId = nil
+                model.selectedConnectorId = k.id
+            } label: {
+                Label(route(k), systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                    .font(.caption).lineLimit(1)
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    @ViewBuilder private func connectorInspector(_ k: PresetDocument.Connector) -> some View {
+        HStack {
+            Text("CONNECTOR").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
+            Spacer()
+            Button(role: .destructive) { model.deleteConnector(k.id) } label: { Image(systemName: "trash") }
+                .buttonStyle(.borderless)
+        }
+        Label(route(k), systemImage: "arrow.right").font(.callout)
+        labeled("Label") {
+            TextField("Optional label", text: Binding(get: { k.label }, set: { model.setConnectorLabel(k.id, $0) }))
+                .textFieldStyle(.roundedBorder)
+        }
+        labeled("Color") {
+            HStack(spacing: 6) {
+                ForEach(PresetDocument.palette, id: \.self) { hex in
+                    Circle().fill(Color(electraHex: hex)).frame(width: 20, height: 20)
+                        .overlay(Circle().stroke(Color.primary.opacity(k.colorHex.caseInsensitiveCompare(hex) == .orderedSame ? 0.9 : 0.15), lineWidth: 2))
+                        .onTapGesture { model.setConnectorColor(k.id, hex: hex) }
+                }
+            }
+        }
+        switch k.target {
+        case .control:
+            Button { model.reverseConnector(k.id) } label: {
+                Label("Reverse Direction", systemImage: "arrow.left.arrow.right")
+            }
+        case .page(let pid):
+            Button { model.followConnector(k) } label: {
+                Label("Go to \(pageName(pid))", systemImage: "arrow.right.square")
+            }
+        }
+        Divider()
+        Text("Connectors are board annotations — they save with the file but are never uploaded to the device.")
+            .font(.caption).foregroundStyle(ElectraTheme.textTertiary).fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func controlName(_ id: Int) -> String {
+        guard let c = model.document?.control(id: id) else { return "#\(id)" }
+        return c.name.isEmpty ? c.type.uppercased() : c.name
+    }
+
+    private func pageName(_ id: Int) -> String {
+        model.document?.pages.first { $0.id == id }?.name ?? "Page \(id)"
+    }
+
+    private func route(_ k: PresetDocument.Connector) -> String {
+        switch k.target {
+        case .control(let t): return "\(controlName(k.fromControlId)) → \(controlName(t))"
+        case .page(let p):    return "\(controlName(k.fromControlId)) → \(pageName(p))"
         }
     }
 

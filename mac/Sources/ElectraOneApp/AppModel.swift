@@ -34,6 +34,7 @@ final class AppModel: ObservableObject {
     @Published var dirty = false
     @Published var currentPageId: Int = 1
     @Published var selectedControlId: Int? = nil
+    @Published var selectedConnectorId: Int? = nil
 
     // Status
     @Published var busy = false
@@ -252,6 +253,7 @@ final class AppModel: ObservableObject {
         self.deviceSlot = deviceSlot.map { (bank: $0.0, slot: $0.1) }
         currentPageId = doc.pages.first?.id ?? 1
         selectedControlId = nil
+        selectedConnectorId = nil
         dirty = false
         undoStack.removeAll()
         redoStack.removeAll()
@@ -605,7 +607,7 @@ final class AppModel: ObservableObject {
         // Make sure the current editor script rides along with the upload.
         if !luaSource.isEmpty { doc.lua = luaSource }
 
-        let json = doc.jsonString(pretty: false)
+        let json = doc.jsonString(pretty: false, forDevice: true)
         let lua = doc.lua
         let b = saveBank, s = saveSlot
         let luaNote = (lua?.isEmpty == false) ? " + Lua" : ""
@@ -640,6 +642,15 @@ final class AppModel: ObservableObject {
         return document?.control(id: id)
     }
 
+    var currentConnectors: [PresetDocument.Connector] {
+        document?.connectors(onPage: currentPageId) ?? []
+    }
+
+    var selectedConnector: PresetDocument.Connector? {
+        guard let id = selectedConnectorId else { return nil }
+        return document?.connector(id: id)
+    }
+
     /// Single mutation funnel. Snapshots the document for undo before applying.
     private func edit(_ body: (inout PresetDocument) -> Void) {
         guard var doc = document else { return }
@@ -663,6 +674,7 @@ final class AppModel: ObservableObject {
         document = prev
         dirty = true
         if let id = selectedControlId, prev.control(id: id) == nil { selectedControlId = nil }
+        if let id = selectedConnectorId, prev.connector(id: id) == nil { selectedConnectorId = nil }
         refreshUndoFlags()
         message = "Undo."
     }
@@ -880,7 +892,43 @@ final class AppModel: ObservableObject {
         guard !ids.isEmpty else { return }
         edit { doc in for id in ids { doc.removeControl(id: id) } }
         if let s = selectedControlId, ids.contains(s) { selectedControlId = nil }
+        // Connectors attached to a deleted control go with it.
+        if let s = selectedConnectorId, document?.connector(id: s) == nil { selectedConnectorId = nil }
         message = ids.count == 1 ? "Deleted control." : "Deleted \(ids.count) controls."
+    }
+
+    // ── Connectors ───────────────────────────────────────────────────────────
+
+    /// Draw a connector arrow from a control to another control or a page.
+    /// New arrows inherit the source control's color and become the selection
+    /// so the inspector opens on them.
+    func addConnector(from controlId: Int, to target: PresetDocument.ConnectorTarget) {
+        var newId: Int?
+        edit { doc in
+            let color = doc.control(id: controlId)?.colorHex ?? "FFFFFF"
+            newId = doc.addConnector(fromControlId: controlId, to: target, colorHex: color)
+        }
+        selectedControlId = nil
+        selectedConnectorId = newId
+        message = "Added connector."
+    }
+
+    func deleteConnector(_ id: Int) {
+        edit { $0.removeConnector(id: id) }
+        if selectedConnectorId == id { selectedConnectorId = nil }
+        message = "Deleted connector."
+    }
+
+    func setConnectorLabel(_ id: Int, _ label: String) { edit { $0.setConnectorLabel(id: id, label) } }
+    func setConnectorColor(_ id: Int, hex: String) { edit { $0.setConnectorColor(id: id, hex: hex) } }
+    func reverseConnector(_ id: Int) { edit { $0.reverseConnector(id: id) } }
+
+    /// Jump to a page-link connector's target page (clicking its page pill).
+    func followConnector(_ connector: PresetDocument.Connector) {
+        guard case .page(let pid) = connector.target else { return }
+        currentPageId = pid
+        selectedControlId = nil
+        selectedConnectorId = nil
     }
 
     /// Move several controls by the same delta in one undo step (used for
