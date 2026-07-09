@@ -1,0 +1,275 @@
+{
+  "version": 2,
+  "name": "EHX 95000 Looper",
+  "projectId": "ehx95000-performance",
+  "pages": [
+    { "id": 1, "name": "Mixer" },
+    { "id": 2, "name": "Transport" },
+    { "id": 3, "name": "Loops & Tempo" }
+  ],
+  "devices": [
+    {
+      "id": 1,
+      "name": "EHX 95000",
+      "port": 1,
+      "channel": 1,
+      "rate": 20
+    }
+  ],
+  "overlays": [
+    {
+      "id": 1,
+      "items": [
+        { "value": 1, "label": "1: 4/4 Stick Metronome 100" },
+        { "value": 2, "label": "2: 4/4 Kick Drum 100" },
+        { "value": 3, "label": "3: 4/4 Electro Kick 100" },
+        { "value": 4, "label": "4: Funky Beat 100" },
+        { "value": 5, "label": "5: Rock Beat 100" },
+        { "value": 6, "label": "6: Heavy Drums 120" },
+        { "value": 7, "label": "7: Rock Beat 2 100" },
+        { "value": 8, "label": "8: Tom Rock Beat 100" },
+        { "value": 9, "label": "9: Funky Beat 2 110" },
+        { "value": 10, "label": "10: Boots & Cats 100" },
+        { "value": 11, "label": "11: 90s Hip Hop 100" },
+        { "value": 12, "label": "12: Slow Jam 72" },
+        { "value": 13, "label": "13: Funk 3 80" },
+        { "value": 14, "label": "14: DRM32 108" },
+        { "value": 15, "label": "15: CR78 100" },
+        { "value": 16, "label": "16: Jazz Drums 140" },
+        { "value": 17, "label": "17: Country 112" },
+        { "value": 18, "label": "18: Bossa Nova 120" },
+        { "value": 19, "label": "19: 3/4 Stick Metronome 120" },
+        { "value": 20, "label": "20: 6/8 Rhythm 200" }
+      ]
+    }
+  ],
+  "controls": [
+    // Page 1: Mixer - Track volumes (expand with more faders/knobs for pans/overdubs)
+    {
+      "id": 1,
+      "type": "fader",
+      "name": "Track 1 Vol",
+      "color": "00FF00",
+      "bounds": [20, 20, 60, 180],
+      "pageId": 1,
+      "values": [
+        {
+          "id": "value",
+          "min": 0,
+          "max": 127,
+          "message": {
+            "deviceId": 1,
+            "type": "cc7",
+            "parameterNumber": 20
+          }
+        }
+      ]
+    },
+    // Repeat similar faders for Track 2-6 (CC21-25) and Mixdown (CC26) - just change parameterNumber and bounds x-position
+    {
+      "id": 7,
+      "type": "fader",
+      "name": "Master LVL",
+      "color": "FFAA00",
+      "bounds": [300, 20, 60, 180],
+      "pageId": 1,
+      "values": [
+        {
+          "id": "value",
+          "min": 0,
+          "max": 127,
+          "message": {
+            "deviceId": 1,
+            "type": "cc7",
+            "parameterNumber": 7
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "fader",
+      "name": "Tempo",
+      "color": "FF00FF",
+      "bounds": [380, 20, 60, 180],
+      "pageId": 1,
+      "values": [
+        {
+          "id": "value",
+          "min": 0,
+          "max": 127,
+          "message": {
+            "deviceId": 1,
+            "type": "cc7",
+            "parameterNumber": 27
+          }
+        }
+      ]
+    },
+
+    // Page 2: Transport - Main buttons (pad = momentary press)
+    {
+      "id": 101,
+      "type": "pad",
+      "name": "RECORD",
+      "color": "FF0000",
+      "bounds": [20, 20, 80, 80],
+      "pageId": 2,
+      "values": [
+        {
+          "id": "value",
+          "min": 0,
+          "max": 0,
+          "message": {
+            "deviceId": 1,
+            "type": "program",
+            "parameterNumber": 102
+          }
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "type": "pad",
+      "name": "PLAY / STOP",
+      "color": "00FF00",
+      "bounds": [120, 20, 80, 80],
+      "pageId": 2,
+      "values": [
+        {
+          "id": "value",
+          "min": 0,
+          "max": 0,
+          "message": {
+            "deviceId": 1,
+            "type": "program",
+            "parameterNumber": 103
+          }
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "type": "pad",
+      "name": "NEW LOOP",
+      "color": "FFFF00",
+      "bounds": [220, 20, 80, 80],
+      "pageId": 2,
+      "values": [
+        {
+          "id": "value",
+          "min": 0,
+          "max": 0,
+          "message": {
+            "deviceId": 1,
+            "type": "program",
+            "parameterNumber": 106
+          }
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "type": "pad",
+      "name": "UNDO",
+      "color": "AAAAAA",
+      "bounds": [320, 20, 80, 80],
+      "pageId": 2,
+      "values": [
+        {
+          "id": "value",
+          "min": 0,
+          "max": 0,
+          "message": {
+            "deviceId": 1,
+            "type": "program",
+            "parameterNumber": 101
+          }
+        }
+      ]
+    },
+    {
+      "id": 105,
+      "type": "pad",
+      "name": "TAP",
+      "color": "00AAFF",
+      "bounds": [420, 20, 80, 80],
+      "pageId": 2,
+      "values": [
+        {
+          "id": "value",
+          "min": 0,
+          "max": 0,
+          "message": {
+            "deviceId": 1,
+            "type": "program",
+            "parameterNumber": 109
+          }
+        }
+      ]
+    },
+    {
+      "id": 106,
+      "type": "pad",
+      "name": "EXT CLOCK",
+      "color": "FF00FF",
+      "bounds": [20, 120, 80, 80],
+      "pageId": 2,
+      "values": [
+        {
+          "id": "value",
+          "min": 0,
+          "max": 0,
+          "message": {
+            "deviceId": 1,
+            "type": "program",
+            "parameterNumber": 127
+          }
+        }
+      ]
+    },
+
+    // Page 3: Loops & Tempo - Factory drums list + direct select
+    {
+      "id": 201,
+      "type": "list",
+      "name": "Factory Drums (Mixdown)",
+      "color": "FFFFFF",
+      "bounds": [20, 20, 300, 200],
+      "pageId": 3,
+      "overlayId": 1,
+      "values": [
+        {
+          "id": "value",
+          "min": 1,
+          "max": 20,
+          "message": {
+            "deviceId": 1,
+            "type": "program",
+            "parameterNumber": 0   // base 0; the list value adds the offset (1-20)
+          }
+        }
+      ]
+    },
+    {
+      "id": 202,
+      "type": "dial",
+      "name": "Loop Select",
+      "color": "00FFFF",
+      "bounds": [340, 20, 100, 100],
+      "pageId": 3,
+      "values": [
+        {
+          "id": "value",
+          "min": 0,
+          "max": 99,
+          "message": {
+            "deviceId": 1,
+            "type": "program",
+            "parameterNumber": 0
+          }
+        }
+      ]
+    }
+  ]
+}
