@@ -1,0 +1,319 @@
+{
+  "schemaVersion": 2,
+  "id": "ehx-95000-eproj",
+  "name": "EHX 95000",
+  "description": "Electra One Mini controller for EHX 95000 looper (Lua PC buttons + CC mix).",
+  "lua": "-- ============================================================================\r\n-- Electro-Harmonix 95000 Performance Loop Laboratory\r\n-- Electra One Mini companion script\r\n--\r\n-- Continuous CCs (volumes, pans\u2026) are handled by the preset JSON.\r\n-- Footswitches / buttons are sent from Lua as MIDI Program Change (manual\r\n-- p.37) so we avoid parameterMap fights from shared carriers.\r\n--\r\n-- MIDI map (95000 User Reference Manual v1.0):\r\n--   CC7  MASTER LVL \u00b7 CC9 CLIX LVL \u00b7 CC14/15 DRY L/R \u00b7 CC20-25 Track vols\r\n--   CC26 MIXDOWN \u00b7 CC27 TEMPO \u00b7 CC28 Expression \u00b7 CC29/30 DRY pan\r\n--   CC85-90 Track pans \u00b7 CC102-108 Overdub (DUB) \u00b7 CC115 Loop select 0-99\r\n--   PC 0-99 loop select \u00b7 PC 100-127 transport / buttons / mute\r\n--\r\n-- Toggle state (optimistic local + optional MIDI-in mirror):\r\n--   The 95000 only *receives* CC/PC \u2014 it does not transmit button state\r\n--   (manual p.35). Electra tracks toggles when *we* press them, and will\r\n--   also advance UI if a matching PC/CC3 arrives on MIDI IN (thru loop,\r\n--   external controller). Hardware presses on the 95000 itself cannot be\r\n--   observed over MIDI.\r\n--\r\n-- EXT. CLOCK is 3-way (manual p.12\u201313, 32) \u2014 not USB vs DIN:\r\n--   IN  LED off     = internal clock master\r\n--   XT  LED solid   = full external slave (Clock + Start/Stop/SPP)\r\n--   BX  LED blinks  = beat-sync slave (Clock only; ignores Start)\r\n--\r\n-- MIDI clock master (Modes page):\r\n--   TEMPO fader (virtual 40\u2013240 BPM) + Start/Stop MIDI Clock pad.\r\n--   Electra emits 24 PPQN Clock + Start/Stop for XT/BX slave modes.\r\n--\r\n-- Routing: Electra Mini TRS = Port 1 / MIDI IO. Lua sends on MIDI_IO.\r\n-- ============================================================================\r\n\r\nprint(\"EHX 95000 Mini controller loaded\")\r\n\r\nlocal DEVICE_ID = 1\r\nlocal WANTED_PORT = 1\r\nlocal WANTED_CH = 1\r\nlocal OUT = PORT_1\r\nlocal CH = 1\r\nlocal IFACE = (MIDI_IO ~= nil) and MIDI_IO or nil\r\n\r\n-- Minimum gap between button-push messages (manual: >= 300 ms)\r\nlocal MIN_BTN_MS = 320\r\nlocal lastBtnMs = 0\r\nlocal lastSentPc = -1\r\nlocal lastSentMs = 0\r\nlocal ECHO_MS = 80\r\n\r\n-- MIDI clock master state (Electra \u2192 95000)\r\nlocal PPQN = 24\r\nlocal BPM_MIN, BPM_MAX = 40, 240\r\nlocal bpm = 120\r\nlocal clockRunning = false\r\nlocal CLOCK_PAD_ID = 55\r\nlocal LABEL_START = \"Start MIDI Clock\"\r\nlocal LABEL_STOP  = \"Stop MIDI Clock\"\r\n\r\n-- UI colors (24-bit RGB for Control:setColor)\r\nlocal COL = {\r\n    dim   = 0x94A3B8,\r\n    rec   = 0xF97316,\r\n    play  = 0x22C55E,\r\n    mix   = 0xF59E0B,\r\n    fx    = 0xEC4899,\r\n    loop  = 0x06B6D4,\r\n    amber = 0xFBBF24,\r\n    green = 0x22C55E,\r\n    pink  = 0xF472B6,\r\n    cyan  = 0x22D3EE,\r\n    orange= 0xFB923C,\r\n}\r\n\r\n-- Control ids from generate.py\r\nlocal ID = {\r\n    reverse  = 45,\r\n    mixdown  = 44,\r\n    oct      = 50,\r\n    punch    = 51,\r\n    quantize = 52,\r\n    extClock = 53,\r\n    clockRun = 55,\r\n}\r\n\r\nlocal ctrlCache = {}\r\n\r\nlocal function nowMs()\r\n    local ok, t = pcall(function() return controller.uptime() end)\r\n    if ok and type(t) == \"number\" then return t end\r\n    return 0\r\nend\r\n\r\nlocal function syncMidiRoute()\r\n    local dev = devices.get(DEVICE_ID)\r\n    if not dev then\r\n        OUT = PORT_1\r\n        CH = WANTED_CH\r\n        info.setText(\"95000 P1 ch1 (no dev)\")\r\n        return\r\n    end\r\n\r\n    pcall(function() dev:setPort(WANTED_PORT) end)\r\n    pcall(function() dev:setChannel(WANTED_CH) end)\r\n\r\n    local port = WANTED_PORT\r\n    local okp, p = pcall(function() return dev:getPort() end)\r\n    if okp and type(p) == \"number\" then\r\n        port = p\r\n    end\r\n    OUT = (port == 2) and PORT_2 or PORT_1\r\n\r\n    local okc, c = pcall(function() return dev:getChannel() end)\r\n    if okc and type(c) == \"number\" and c >= 1 and c <= 16 then\r\n        CH = c\r\n    else\r\n        CH = WANTED_CH\r\n    end\r\n\r\n    local ifaceName = (IFACE ~= nil) and \"MIDI_IO\" or \"ALL\"\r\n    print(string.format(\"95000 MIDI -> %s PORT_%d ch %d\", ifaceName, port, CH))\r\n    info.setText(string.format(\"95000 P%d ch%d %s\", port, CH, ifaceName))\r\nend\r\n\r\nlocal function clamp(v, lo, hi)\r\n    if v < lo then return lo end\r\n    if v > hi then return hi end\r\n    return v\r\nend\r\n\r\nlocal function pressed(value)\r\n    if value == nil or value == \"off\" or value == false then\r\n        return false\r\n    end\r\n    if type(value) == \"number\" then\r\n        return value ~= 0\r\n    end\r\n    return true\r\nend\r\n\r\nlocal function getCtrl(id)\r\n    if ctrlCache[id] then return ctrlCache[id] end\r\n    local ok, c = pcall(function() return controls.get(id) end)\r\n    if ok and c then\r\n        ctrlCache[id] = c\r\n    end\r\n    return ctrlCache[id]\r\nend\r\n\r\nlocal function paintPad(id, name, color)\r\n    local c = getCtrl(id)\r\n    if not c then return end\r\n    pcall(function() c:setName(name) end)\r\n    pcall(function() c:setColor(color) end)\r\nend\r\n\r\nlocal function sendCC(cc, value)\r\n    if IFACE ~= nil then\r\n        midi.sendControlChange(IFACE, OUT, CH, cc, value)\r\n    else\r\n        midi.sendControlChange(OUT, CH, cc, value)\r\n    end\r\nend\r\n\r\nlocal function sendPC(program)\r\n    if IFACE ~= nil then\r\n        midi.sendProgramChange(IFACE, OUT, CH, program)\r\n    else\r\n        midi.sendProgramChange(OUT, CH, program)\r\n    end\r\nend\r\n\r\n-- Realtime transport (channel-less). Prefer TRS MIDI_IO when available.\r\nlocal function sendClockPulse()\r\n    if IFACE ~= nil then\r\n        pcall(function() midi.sendClock(IFACE, OUT) end)\r\n    else\r\n        pcall(function() midi.sendClock(OUT) end)\r\n    end\r\nend\r\n\r\nlocal function sendStart()\r\n    if IFACE ~= nil then\r\n        pcall(function() midi.sendStart(IFACE, OUT) end)\r\n    else\r\n        pcall(function() midi.sendStart(OUT) end)\r\n    end\r\nend\r\n\r\nlocal function sendStop()\r\n    if IFACE ~= nil then\r\n        pcall(function() midi.sendStop(IFACE, OUT) end)\r\n    else\r\n        pcall(function() midi.sendStop(OUT) end)\r\n    end\r\nend\r\n\r\nlocal function applyBpm(newBpm)\r\n    bpm = clamp(math.floor(newBpm + 0.5), BPM_MIN, BPM_MAX)\r\n    pcall(function() timer.setBpm(bpm * PPQN) end)\r\nend\r\n\r\nlocal function setClockPadLabel(running)\r\n    local label = running and LABEL_STOP or LABEL_START\r\n    local color = running and COL.rec or COL.play\r\n    paintPad(CLOCK_PAD_ID, label, color)\r\nend\r\n\r\nlocal function startClock()\r\n    applyBpm(bpm)\r\n    clockRunning = true\r\n    pcall(function() timer.enable() end)\r\n    sendStart()\r\n    setClockPadLabel(true)\r\n    info.setText(string.format(\"CLK %d ON\", bpm))\r\nend\r\n\r\nlocal function stopClock()\r\n    clockRunning = false\r\n    sendStop()\r\n    pcall(function() timer.disable() end)\r\n    setClockPadLabel(false)\r\n    info.setText(string.format(\"CLK %d OFF\", bpm))\r\nend\r\n\r\nfunction timer.onTick()\r\n    if clockRunning then\r\n        sendClockPulse()\r\n    end\r\nend\r\n\r\n-- Throttled button press via Program Change (PC 100-127).\r\n-- Returns true if the message was sent.\r\nlocal function pulsePC(pc, label)\r\n    local t = nowMs()\r\n    if t > 0 and (t - lastBtnMs) < MIN_BTN_MS then\r\n        info.setText(\"wait\u2026\")\r\n        return false\r\n    end\r\n    lastBtnMs = t\r\n    lastSentPc = pc\r\n    lastSentMs = t\r\n    sendPC(pc)\r\n    if label then\r\n        info.setText(label)\r\n    end\r\n    return true\r\nend\r\n\r\nlocal function isOurEcho(pc)\r\n    local t = nowMs()\r\n    if lastSentPc ~= pc then return false end\r\n    if t > 0 and lastSentMs > 0 and (t - lastSentMs) <= ECHO_MS then\r\n        return true\r\n    end\r\n    -- uptime unavailable: still suppress one matching echo shortly after send\r\n    if t == 0 and lastSentPc == pc then\r\n        lastSentPc = -1\r\n        return true\r\n    end\r\n    return false\r\nend\r\n\r\n-- ---------------------------------------------------------------------------\r\n-- Toggle state (optimistic)\r\n-- ---------------------------------------------------------------------------\r\n\r\n-- Binary: false=off, true=on\r\nlocal bin = {\r\n    reverse  = false,\r\n    oct      = false,\r\n    punch    = false,\r\n    quantize = false,\r\n}\r\n\r\n-- EXT. CLOCK: 0=IN, 1=XT, 2=BX\r\nlocal extMode = 0\r\n-- MIXDOWN: 0=off, 1=normal, 2=constant-tempo\r\nlocal mixMode = 0\r\n\r\nlocal function applyBinaryUi(key)\r\n    if key == \"reverse\" then\r\n        if bin.reverse then\r\n            paintPad(ID.reverse, \"REV ON\", COL.pink)\r\n        else\r\n            paintPad(ID.reverse, \"REVERSE\", COL.fx)\r\n        end\r\n    elseif key == \"oct\" then\r\n        if bin.oct then\r\n            paintPad(ID.oct, \"OCT ON\", COL.pink)\r\n        else\r\n            paintPad(ID.oct, \"OCT\", COL.fx)\r\n        end\r\n    elseif key == \"punch\" then\r\n        if bin.punch then\r\n            paintPad(ID.punch, \"PUNCH ON\", COL.orange)\r\n        else\r\n            paintPad(ID.punch, \"PUNCH\", COL.rec)\r\n        end\r\n    elseif key == \"quantize\" then\r\n        if bin.quantize then\r\n            paintPad(ID.quantize, \"QNTZ ON\", COL.cyan)\r\n        else\r\n            paintPad(ID.quantize, \"QUANTIZE\", COL.loop)\r\n        end\r\n    end\r\nend\r\n\r\nlocal function applyExtClockUi()\r\n    if extMode == 0 then\r\n        paintPad(ID.extClock, \"EXT IN\", COL.dim)\r\n    elseif extMode == 1 then\r\n        paintPad(ID.extClock, \"EXT XT\", COL.green)\r\n    else\r\n        paintPad(ID.extClock, \"EXT BX\", COL.amber)\r\n    end\r\nend\r\n\r\nlocal function applyMixdownUi()\r\n    if mixMode == 0 then\r\n        paintPad(ID.mixdown, \"MIXDOWN\", COL.mix)\r\n    elseif mixMode == 1 then\r\n        paintPad(ID.mixdown, \"MIX NORM\", COL.orange)\r\n    else\r\n        paintPad(ID.mixdown, \"MIX CT\", COL.amber)\r\n    end\r\nend\r\n\r\nlocal function applyAllToggleUi()\r\n    applyBinaryUi(\"reverse\")\r\n    applyBinaryUi(\"oct\")\r\n    applyBinaryUi(\"punch\")\r\n    applyBinaryUi(\"quantize\")\r\n    applyExtClockUi()\r\n    applyMixdownUi()\r\n    setClockPadLabel(clockRunning)\r\nend\r\n\r\nlocal function extLabel()\r\n    if extMode == 0 then return \"EXT IN (internal)\" end\r\n    if extMode == 1 then return \"EXT XT (full slave)\" end\r\n    return \"EXT BX (beat sync)\"\r\nend\r\n\r\nlocal function mixLabel()\r\n    if mixMode == 0 then return \"MIXDOWN off\" end\r\n    if mixMode == 1 then return \"MIX normal\" end\r\n    return \"MIX CT\"\r\nend\r\n\r\n-- Advance local state for a toggle PC (no MIDI send). Used after we send,\r\n-- and when a remote PC/CC3 arrives (not our echo).\r\nlocal function advanceToggleFromPc(pc)\r\n    if pc == 107 then\r\n        bin.reverse = not bin.reverse\r\n        applyBinaryUi(\"reverse\")\r\n        info.setText(bin.reverse and \"REV ON\" or \"REV OFF\")\r\n        return true\r\n    elseif pc == 108 then\r\n        bin.oct = not bin.oct\r\n        applyBinaryUi(\"oct\")\r\n        info.setText(bin.oct and \"OCT ON\" or \"OCT OFF\")\r\n        return true\r\n    elseif pc == 117 then\r\n        bin.punch = not bin.punch\r\n        applyBinaryUi(\"punch\")\r\n        info.setText(bin.punch and \"PUNCH ON\" or \"PUNCH OFF\")\r\n        return true\r\n    elseif pc == 118 then\r\n        bin.quantize = not bin.quantize\r\n        applyBinaryUi(\"quantize\")\r\n        info.setText(bin.quantize and \"QNTZ ON\" or \"QNTZ OFF\")\r\n        return true\r\n    elseif pc == 127 then\r\n        extMode = (extMode + 1) % 3\r\n        applyExtClockUi()\r\n        info.setText(extLabel())\r\n        return true\r\n    elseif pc == 116 then\r\n        mixMode = (mixMode + 1) % 3\r\n        applyMixdownUi()\r\n        info.setText(mixLabel())\r\n        return true\r\n    end\r\n    return false\r\nend\r\n\r\n-- Local pad press: send PC then advance UI state.\r\nlocal function pressToggle(pc)\r\n    if not pulsePC(pc) then return end\r\n    advanceToggleFromPc(pc)\r\nend\r\n\r\n-- ---------------------------------------------------------------------------\r\n-- Transport / footswitches (PC) \u2014 momentary, no latch\r\n-- ---------------------------------------------------------------------------\r\n\r\nfunction onPlayStop(valueObject, value)\r\n    if pressed(value) then pulsePC(103, \"PLAY/STOP\") end\r\nend\r\n\r\nfunction onRecord(valueObject, value)\r\n    if pressed(value) then pulsePC(102, \"RECORD\") end\r\nend\r\n\r\nfunction onUndo(valueObject, value)\r\n    if pressed(value) then pulsePC(101, \"UNDO\") end\r\nend\r\n\r\nfunction onTrackFsw(valueObject, value)\r\n    if pressed(value) then pulsePC(100, \"TRACK FSW\") end\r\nend\r\n\r\nfunction onLoopDown(valueObject, value)\r\n    if pressed(value) then pulsePC(104, \"LOOP DN\") end\r\nend\r\n\r\nfunction onLoopUp(valueObject, value)\r\n    if pressed(value) then pulsePC(105, \"LOOP UP\") end\r\nend\r\n\r\nfunction onNewLoop(valueObject, value)\r\n    if pressed(value) then pulsePC(106, \"NEW LOOP\") end\r\nend\r\n\r\nfunction onReverse(valueObject, value)\r\n    if pressed(value) then pressToggle(107) end\r\nend\r\n\r\nfunction onOct(valueObject, value)\r\n    if pressed(value) then pressToggle(108) end\r\nend\r\n\r\nfunction onTap(valueObject, value)\r\n    if pressed(value) then pulsePC(109, \"TAP\") end\r\nend\r\n\r\nfunction onTrack1(valueObject, value)\r\n    if pressed(value) then pulsePC(110, \"TRACK 1\") end\r\nend\r\n\r\nfunction onTrack2(valueObject, value)\r\n    if pressed(value) then pulsePC(111, \"TRACK 2\") end\r\nend\r\n\r\nfunction onTrack3(valueObject, value)\r\n    if pressed(value) then pulsePC(112, \"TRACK 3\") end\r\nend\r\n\r\nfunction onTrack4(valueObject, value)\r\n    if pressed(value) then pulsePC(113, \"TRACK 4\") end\r\nend\r\n\r\nfunction onTrack5(valueObject, value)\r\n    if pressed(value) then pulsePC(114, \"TRACK 5\") end\r\nend\r\n\r\nfunction onTrack6(valueObject, value)\r\n    if pressed(value) then pulsePC(115, \"TRACK 6\") end\r\nend\r\n\r\nfunction onMixdownBtn(valueObject, value)\r\n    if pressed(value) then pressToggle(116) end\r\nend\r\n\r\nfunction onPunch(valueObject, value)\r\n    if pressed(value) then pressToggle(117) end\r\nend\r\n\r\nfunction onQuantize(valueObject, value)\r\n    if pressed(value) then pressToggle(118) end\r\nend\r\n\r\nfunction onPage(valueObject, value)\r\n    if pressed(value) then pulsePC(119, \"PAGE\") end\r\nend\r\n\r\nfunction onExtClock(valueObject, value)\r\n    -- Cycles 95000 IN \u2192 XT \u2192 BX. Does not start Electra's clock generator.\r\n    if pressed(value) then pressToggle(127) end\r\nend\r\n\r\n-- Dial Electra master tempo (virtual fader, 40\u2013240 BPM). Live-updates the\r\n-- clock generator while running; 95000 follows via MIDI Clock, not CC27.\r\nfunction onTempo(valueObject, value)\r\n    applyBpm(value)\r\n    if clockRunning then\r\n        info.setText(string.format(\"CLK %d ON\", bpm))\r\n    else\r\n        info.setText(string.format(\"BPM %d\", bpm))\r\n    end\r\nend\r\n\r\n-- Toggle MIDI clock master out (Start/Clock/Stop \u2192 95000 MIDI IN).\r\nfunction onClockRun(valueObject, value)\r\n    if not pressed(value) then return end\r\n    if clockRunning then\r\n        stopClock()\r\n    else\r\n        startClock()\r\n    end\r\nend\r\n\r\n-- Mute/unmute tracks (PC 120-126) \u2014 device-side mute depends on current level;\r\n-- we do not latch mute state here.\r\nfunction onMute1(valueObject, value)\r\n    if pressed(value) then pulsePC(120, \"MUTE T1\") end\r\nend\r\nfunction onMute2(valueObject, value)\r\n    if pressed(value) then pulsePC(121, \"MUTE T2\") end\r\nend\r\nfunction onMute3(valueObject, value)\r\n    if pressed(value) then pulsePC(122, \"MUTE T3\") end\r\nend\r\nfunction onMute4(valueObject, value)\r\n    if pressed(value) then pulsePC(123, \"MUTE T4\") end\r\nend\r\nfunction onMute5(valueObject, value)\r\n    if pressed(value) then pulsePC(124, \"MUTE T5\") end\r\nend\r\nfunction onMute6(valueObject, value)\r\n    if pressed(value) then pulsePC(125, \"MUTE T6\") end\r\nend\r\nfunction onMuteMix(valueObject, value)\r\n    if pressed(value) then pulsePC(126, \"MUTE MIX\") end\r\nend\r\n\r\n-- Loop direct select (manual p.35-37):\r\n--   PC 0-99  selects loop 00-99  (same channel path as LOOP UP/DN \u2014 reliable)\r\n--   CC115 0-99 is the alternate continuous select path\r\nfunction onLoopSelect(valueObject, value)\r\n    local n = clamp(math.floor(value + 0.5), 0, 99)\r\n    sendPC(n)\r\n    sendCC(115, n)\r\n    info.setText(string.format(\"Loop %02d\", n))\r\nend\r\n\r\n-- ---------------------------------------------------------------------------\r\n-- MIDI IN \u2014 mirror toggle advances when a matching PC/CC3 arrives.\r\n-- Suppress our own thru-echoes (EXT CLOCK modes enable MIDI THRU on 95000).\r\n-- ---------------------------------------------------------------------------\r\n\r\nlocal function channelMatches(channel)\r\n    if type(channel) ~= \"number\" then return true end\r\n    -- 0-based or 1-based channel reporting varies by firmware path\r\n    if channel == CH or channel == (CH - 1) then return true end\r\n    return false\r\nend\r\n\r\nfunction midi.onProgramChange(midiInput, channel, program)\r\n    if not channelMatches(channel) then return end\r\n    if type(program) ~= \"number\" then return end\r\n    if isOurEcho(program) then return end\r\n    advanceToggleFromPc(program)\r\nend\r\n\r\nfunction midi.onControlChange(midiInput, channel, controllerNumber, value)\r\n    if not channelMatches(channel) then return end\r\n    -- CC3 button-press path (same data values as PC 100\u2013127)\r\n    if controllerNumber == 3 and type(value) == \"number\" and value >= 100 then\r\n        if isOurEcho(value) then return end\r\n        advanceToggleFromPc(value)\r\n    end\r\nend\r\n\r\n-- ---------------------------------------------------------------------------\r\n-- Soft-key userFunctions (Assign Buttons backup)\r\n-- pot1..pot4 \u2192 soft keys 2-5 when assigned\r\n-- ---------------------------------------------------------------------------\r\n\r\nfunction ufPlay()\r\n    onPlayStop(nil, 127)\r\nend\r\nfunction ufRecord()\r\n    onRecord(nil, 127)\r\nend\r\nfunction ufUndo()\r\n    onUndo(nil, 127)\r\nend\r\nfunction ufTap()\r\n    onTap(nil, 127)\r\nend\r\n\r\npreset.userFunctions = {\r\n    pot1 = { call = ufPlay,   name = \"PLAY/STOP\", close = false },\r\n    pot2 = { call = ufRecord, name = \"RECORD\",    close = false },\r\n    pot3 = { call = ufUndo,   name = \"UNDO\",      close = false },\r\n    pot4 = { call = ufTap,    name = \"TAP\",       close = false },\r\n}\r\n\r\nfunction preset.onLoad()\r\n    syncMidiRoute()\r\n    applyBpm(bpm)\r\n    clockRunning = false\r\n    pcall(function() timer.disable() end)\r\n    -- Assume power-up defaults (all toggles off / EXT IN). User can resync\r\n    -- by cycling once if the hardware was left in another state.\r\n    bin.reverse = false\r\n    bin.oct = false\r\n    bin.punch = false\r\n    bin.quantize = false\r\n    extMode = 0\r\n    mixMode = 0\r\n    applyAllToggleUi()\r\nend\r\n\r\nfunction preset.onReady()\r\n    syncMidiRoute()\r\n    applyBpm(bpm)\r\n    clockRunning = false\r\n    pcall(function() timer.disable() end)\r\n    applyAllToggleUi()\r\n    info.setText(string.format(\"95000 ready P%d ch%d\", WANTED_PORT, CH))\r\nend\r\n",
+  "devices": [
+    {
+      "id": 1,
+      "name": "EHX 95000",
+      "instrumentId": "generic-controls",
+      "port": 1,
+      "channel": 1
+    }
+  ],
+  "tiles": [
+    {
+      "id": "00a0aa83-3892-4d3d-b3b5-3bcd2cff9e73",
+      "reference": 1,
+      "slotId": 1,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "3B82F6",
+      "name": "TRK 1",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 20,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "a3fd596b-9a63-4f9f-a31a-8f601d665a0e",
+      "reference": 2,
+      "slotId": 2,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "3B82F6",
+      "name": "TRK 2",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 21,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "96824375-6c0f-49b4-bfad-a71363bf5fcd",
+      "reference": 3,
+      "slotId": 3,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "3B82F6",
+      "name": "TRK 3",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 22,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "b3f718ca-4881-4bcc-9c94-3c93be19cd3f",
+      "reference": 4,
+      "slotId": 4,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "3B82F6",
+      "name": "TRK 4",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 23,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "7f56439d-6abb-487f-9c22-44c2c653dbbc",
+      "reference": 5,
+      "slotId": 5,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "22C55E",
+      "name": "PLAY",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 80,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "8ed5da1d-402a-498b-b6d1-8b620a4ecd35",
+      "reference": 6,
+      "slotId": 6,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "F97316",
+      "name": "RECORD",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 81,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "e4dc3196-0184-4192-9b96-326ed8dd3e89",
+      "reference": 7,
+      "slotId": 7,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "A78BFA",
+      "name": "UNDO",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 82,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "0c8bf47e-7293-4eb8-ae91-b1142d1397c1",
+      "reference": 8,
+      "slotId": 8,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "94A3B8",
+      "name": "TAP",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 83,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "350302e6-3a89-48f6-9d53-3bb53ff279f9",
+      "reference": 9,
+      "slotId": 9,
+      "type": "list",
+      "deviceId": 1,
+      "color": "06B6D4",
+      "name": "LOOP",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 115,
+            "min": 0,
+            "max": 99
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": ""
+    },
+    {
+      "id": "3fbab763-e8ba-4c69-b451-b2b5d065d965",
+      "reference": 10,
+      "slotId": 10,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "F59E0B",
+      "name": "MIX",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 26,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "18d030e0-d890-4c6d-8362-eeba3475cb4f",
+      "reference": 11,
+      "slotId": 11,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "FFFFFF",
+      "name": "MASTER",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 7,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "eecae4f1-4870-4409-a406-e99720e9f054",
+      "reference": 12,
+      "slotId": 12,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "F97316",
+      "name": "NEW LOOP",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 84,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    }
+  ],
+  "pages": [
+    {
+      "id": 1,
+      "name": "95000"
+    }
+  ],
+  "categories": [],
+  "firstPageId": 1
+}

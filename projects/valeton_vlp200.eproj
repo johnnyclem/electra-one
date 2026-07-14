@@ -1,0 +1,322 @@
+{
+  "schemaVersion": 2,
+  "id": "valeton-vlp200-eproj",
+  "name": "VALETON VLP-200",
+  "description": "Electra One Mini controller for Valeton VLP-200 (Lua action pads).",
+  "lua": "-- ============================================================================\r\n-- Valeton VLP-200 - Electra One Mini companion script\r\n--\r\n-- Continuous CCs (volumes) are handled by the preset JSON.\r\n-- All buttons / toggles are sent from Lua so we avoid:\r\n--   1) multiple pads sharing parameterNumber=CC1 (parameterMap fights)\r\n--   2) onValue=0 never transmitting (STOP ALL / Project step)\r\n--\r\n-- Family MIDI map (VLP-400 manual; VLP-200 fw 1.1+ expected):\r\n--   CC2 L1 vol - CC3 L2 vol - CC4 Drum vol\r\n--   CC5 Project UP (0) - CC6 Project DOWN (0)\r\n--   CC1 Footswitch action (data = action id)\r\n--   PC  Project recall 0..98\r\n-- ============================================================================\r\n\r\nprint(\"VLP-200 Mini controller loaded\")\r\n\r\n-- MIDI routing\r\n-- -------------\r\n-- Electra logical ports:\r\n--   Port 1 = MIDI IO 1 + USB Host 1 + USB Device 1\r\n--   Port 2 = MIDI IO 2 + USB Host 2 + USB Device 2\r\n--\r\n-- Electra Mini has only ONE pair of TRS MIDI jacks = MIDI IO 1 = Port 1.\r\n-- Sending on Port 2 lights USB Host/Device LEDs but never the analog MIDI\r\n-- IO indicator (there is no physical MIDI IO 2 on Mini).\r\n--\r\n-- Lua midi.send* can take an optional leading interface:\r\n--   USB_DEV=0, USB_HOST=1, MIDI_IO=2\r\n-- We target MIDI_IO explicitly so the TRS jack is used.\r\nlocal DEVICE_ID = 1\r\nlocal WANTED_PORT = 1   -- must match presets/valeton_vlp200.json devices[0].port\r\nlocal WANTED_CH = 1     -- must match devices[0].channel\r\nlocal OUT = PORT_1\r\nlocal CH = 1\r\n-- Prefer analog TRS. Fall back to fan-out if MIDI_IO is unavailable.\r\nlocal IFACE = (MIDI_IO ~= nil) and MIDI_IO or nil\r\n\r\nlocal function syncMidiRoute()\r\n    local dev = devices.get(DEVICE_ID)\r\n    if not dev then\r\n        print(\"VLP-200: device 1 missing; defaulting to PORT_1 ch1 MIDI_IO\")\r\n        OUT = PORT_1\r\n        CH = WANTED_CH\r\n        info.setText(\"VLP-200 P1 ch1 MIDI_IO\")\r\n        return\r\n    end\r\n\r\n    pcall(function() dev:setPort(WANTED_PORT) end)\r\n    pcall(function() dev:setChannel(WANTED_CH) end)\r\n\r\n    local port = WANTED_PORT\r\n    local okp, p = pcall(function() return dev:getPort() end)\r\n    if okp and type(p) == \"number\" then\r\n        port = p\r\n    end\r\n    OUT = (port == 2) and PORT_2 or PORT_1\r\n\r\n    local okc, c = pcall(function() return dev:getChannel() end)\r\n    if okc and type(c) == \"number\" and c >= 1 and c <= 16 then\r\n        CH = c\r\n    else\r\n        CH = WANTED_CH\r\n    end\r\n\r\n    local ifaceName = (IFACE ~= nil) and \"MIDI_IO\" or \"ALL\"\r\n    print(string.format(\"VLP-200 MIDI -> %s PORT_%d ch %d\", ifaceName, port, CH))\r\n    info.setText(string.format(\"VLP-200 P%d ch%d %s\", port, CH, ifaceName))\r\nend\r\n\r\n-- CC#1 footswitch action ids\r\nlocal ACT = {\r\n    PLAY_STOP_ALL = 0,\r\n    DRUM          = 1,\r\n    TAP           = 2,\r\n    L1_REC        = 3,\r\n    L1_STACK      = 4,\r\n    L1_PLAY       = 5,\r\n    L1_UNDO       = 6,\r\n    L2_REC        = 7,\r\n    L2_STACK      = 8,\r\n    L2_PLAY       = 9,\r\n    L2_UNDO       = 10,\r\n    L1_ONCE       = 21,\r\n    L2_ONCE       = 22,\r\n}\r\n\r\nlocal function clamp(v, lo, hi)\r\n    if v < lo then return lo end\r\n    if v > hi then return hi end\r\n    return v\r\nend\r\n\r\n-- True on pad press. Soft keys (onValue=1) and encoder pads (127)\r\n-- both need to count. Ignore release / off / nil.\r\nlocal function pressed(value)\r\n    if value == nil or value == \"off\" or value == false then\r\n        return false\r\n    end\r\n    if type(value) == \"number\" then\r\n        return value ~= 0\r\n    end\r\n    return true\r\nend\r\n\r\n-- Send helpers: always prefer TRS MIDI IO when available.\r\nlocal function sendCC(cc, value)\r\n    if IFACE ~= nil then\r\n        midi.sendControlChange(IFACE, OUT, CH, cc, value)\r\n    else\r\n        midi.sendControlChange(OUT, CH, cc, value)\r\n    end\r\nend\r\n\r\nlocal function sendPC(program)\r\n    if IFACE ~= nil then\r\n        midi.sendProgramChange(IFACE, OUT, CH, program)\r\n    else\r\n        midi.sendProgramChange(OUT, CH, program)\r\n    end\r\nend\r\n\r\nlocal function sendRaw(bytes)\r\n    if IFACE ~= nil then\r\n        midi.sendMessage(IFACE, OUT, bytes)\r\n    else\r\n        midi.sendMessage(OUT, bytes)\r\n    end\r\nend\r\n\r\nlocal function sendStop()\r\n    if IFACE ~= nil then\r\n        pcall(function() midi.sendStop(IFACE, OUT) end)\r\n    else\r\n        pcall(function() midi.sendStop(OUT) end)\r\n    end\r\nend\r\n\r\nlocal function pulseFs(actionId, label)\r\n    sendCC(1, actionId)\r\n    if label then\r\n        info.setText(label)\r\n    end\r\nend\r\n\r\n-- ---------------------------------------------------------------------------\r\n-- Project\r\n-- ---------------------------------------------------------------------------\r\n\r\nfunction onProjectSelect(valueObject, value)\r\n    local p = clamp(value, 0, 98)\r\n    sendPC(p)\r\n    info.setText(string.format(\"Project %02d ch%d\", p + 1, CH))\r\nend\r\n\r\nfunction onProjectUp(valueObject, value)\r\n    if pressed(value) then\r\n        sendCC(5, 0)\r\n        info.setText(string.format(\"Project UP ch%d\", CH))\r\n    end\r\nend\r\n\r\nfunction onProjectDown(valueObject, value)\r\n    if pressed(value) then\r\n        sendCC(6, 0)\r\n        info.setText(string.format(\"Project DN ch%d\", CH))\r\n    end\r\nend\r\n\r\n-- ---------------------------------------------------------------------------\r\n-- Footswitch actions (CC1)\r\n-- ---------------------------------------------------------------------------\r\n\r\nfunction onPlayStopAll(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.PLAY_STOP_ALL, \"STOP ALL\") end\r\nend\r\n\r\nfunction onDrumToggle(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.DRUM, \"DRUM\") end\r\nend\r\n\r\nfunction onTapTempo(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.TAP, \"TAP\") end\r\nend\r\n\r\nfunction onL1Rec(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.L1_REC, \"L1 REC\") end\r\nend\r\n\r\nfunction onL1Play(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.L1_PLAY, \"L1 PLAY\") end\r\nend\r\n\r\nfunction onL1Undo(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.L1_UNDO, \"L1 UNDO\") end\r\nend\r\n\r\nfunction onL1Stack(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.L1_STACK, \"L1 STACK\") end\r\nend\r\n\r\nfunction onL1Once(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.L1_ONCE, \"L1 ONCE\") end\r\nend\r\n\r\nfunction onL2Rec(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.L2_REC, \"L2 REC\") end\r\nend\r\n\r\nfunction onL2Play(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.L2_PLAY, \"L2 PLAY\") end\r\nend\r\n\r\nfunction onL2Undo(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.L2_UNDO, \"L2 UNDO\") end\r\nend\r\n\r\nfunction onL2Stack(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.L2_STACK, \"L2 STACK\") end\r\nend\r\n\r\nfunction onL2Once(valueObject, value)\r\n    if pressed(value) then pulseFs(ACT.L2_ONCE, \"L2 ONCE\") end\r\nend\r\n\r\n-- ALL PLAY: pulse L1 + L2 play/stop actions\r\nfunction onAllPlay(valueObject, value)\r\n    if not pressed(value) then return end\r\n    sendCC(1, ACT.L1_PLAY)\r\n    sendCC(1, ACT.L2_PLAY)\r\n    info.setText(\"ALL PLAY\")\r\nend\r\n\r\n-- ALL STOP: CC1 action 0 can be dropped by some stacks as \"zero value\",\r\n-- so also stop each loop via its play/stop action + MIDI realtime Stop.\r\nfunction onAllStop(valueObject, value)\r\n    if not pressed(value) then return end\r\n    -- Raw 3-byte CC so value 0 is definitely on the wire\r\n    local status = 0xB0 + (CH - 1)\r\n    sendRaw({ status, 1, ACT.PLAY_STOP_ALL })\r\n    sendCC(1, ACT.L1_PLAY)\r\n    sendCC(1, ACT.L2_PLAY)\r\n    sendCC(1, ACT.DRUM)\r\n    sendStop()\r\n    info.setText(\"ALL STOP\")\r\nend\r\n\r\n-- ---------------------------------------------------------------------------\r\n-- userFunctions -> Assign Buttons (optional override)\r\n-- Primary soft-key path is JSON potIds 9-12 (Mini soft buttons 2-5).\r\n-- These userFunctions are a backup for Preset Menu -> Assign Buttons.\r\n-- ---------------------------------------------------------------------------\r\n\r\nfunction ufL1Stack()\r\n    onL1Stack(nil, 127)\r\nend\r\n\r\nfunction ufAllPlay()\r\n    onAllPlay(nil, 127)\r\nend\r\n\r\nfunction ufAllStop()\r\n    onAllStop(nil, 127)\r\nend\r\n\r\nfunction ufTap()\r\n    onTapTempo(nil, 127)\r\nend\r\n\r\npreset.userFunctions = {\r\n    pot1 = { call = ufL1Stack, name = \"L1 STACK\", close = false },\r\n    pot2 = { call = ufAllPlay, name = \"ALL PLAY\", close = false },\r\n    pot3 = { call = ufAllStop, name = \"ALL STOP\", close = false },\r\n    pot4 = { call = ufTap,     name = \"TAP\",      close = false },\r\n}\r\n\r\nfunction preset.onLoad()\r\n    syncMidiRoute()\r\nend\r\n\r\nfunction preset.onReady()\r\n    syncMidiRoute()\r\n    info.setText(string.format(\"VLP-200 ready P%d ch%d\", WANTED_PORT, CH))\r\nend\r\n",
+  "devices": [
+    {
+      "id": 1,
+      "name": "VLP-200",
+      "instrumentId": "generic-controls",
+      "port": 1,
+      "channel": 1
+    }
+  ],
+  "tiles": [
+    {
+      "id": "ca041c24-4546-4f32-a209-07e394694808",
+      "reference": 1,
+      "slotId": 1,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "22C55E",
+      "name": "LOOP 1",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 2,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "603a5b2b-5bd1-4f4b-b7ef-9eabfcd39f84",
+      "reference": 2,
+      "slotId": 2,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "3B82F6",
+      "name": "LOOP 2",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 3,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "714055ff-f5ee-4654-bb80-d36e25526486",
+      "reference": 3,
+      "slotId": 3,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "F59E0B",
+      "name": "DRUM",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 4,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "0aa5e8dc-562f-4fc4-9ac3-c46fc9621d06",
+      "reference": 4,
+      "slotId": 4,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "EF4444",
+      "name": "STOP ALL",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 84,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "33a395db-ee06-4d6c-967d-b0c129a7b27f",
+      "reference": 5,
+      "slotId": 5,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "F97316",
+      "name": "L1 REC",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 85,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "8efd1b6d-d425-4935-8156-b109d2b87c13",
+      "reference": 6,
+      "slotId": 6,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "22C55E",
+      "name": "L1 PLAY",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 86,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "32dc2880-6e9f-4eed-ad8a-89dfb3cb2061",
+      "reference": 7,
+      "slotId": 7,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "F97316",
+      "name": "L2 REC",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 87,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "75a645b2-cbd9-4edc-86db-abe0686fefda",
+      "reference": 8,
+      "slotId": 8,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "3B82F6",
+      "name": "L2 PLAY",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 88,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "158cbca1-dddf-49f9-9149-a69424ecdb76",
+      "reference": 9,
+      "slotId": 9,
+      "type": "list",
+      "deviceId": 1,
+      "color": "A78BFA",
+      "name": "Project",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "program",
+            "deviceId": 1,
+            "parameterNumber": 0,
+            "min": 0,
+            "max": 98
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": ""
+    },
+    {
+      "id": "14f67cb2-2267-44ea-bf8b-d99f3986628d",
+      "reference": 10,
+      "slotId": 10,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "F59E0B",
+      "name": "DRUM",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 90,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "fafc7ecb-7a16-4857-bfd8-bc340b291d1e",
+      "reference": 11,
+      "slotId": 11,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "94A3B8",
+      "name": "TAP",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 91,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "7f133422-8cf3-4616-bded-9f80d47ba339",
+      "reference": 12,
+      "slotId": 12,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "94A3B8",
+      "name": "L1 UNDO",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 92,
+            "onValue": 127,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    }
+  ],
+  "pages": [
+    {
+      "id": 1,
+      "name": "VLP-200"
+    }
+  ],
+  "categories": [],
+  "firstPageId": 1
+}

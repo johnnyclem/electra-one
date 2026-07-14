@@ -2111,7 +2111,7 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "EXT CLOCK",
+      "name": "EXT IN",
       "color": "94A3B8",
       "bounds": [
         608,
@@ -2184,7 +2184,7 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "Start MIDI \ud83d\udd50",
+      "name": "Start MIDI Clock",
       "color": "22C55E",
       "bounds": [
         216,

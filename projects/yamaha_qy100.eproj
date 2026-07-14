@@ -1,0 +1,308 @@
+{
+  "schemaVersion": 2,
+  "id": "yamaha-qy100-eproj",
+  "name": "YAMAHA QY100",
+  "description": "Electra One controller for Yamaha QY100.\nDevice: presets/yamaha_qy100.json\nLua: presets/yamaha_qy100.lua\n",
+  "lua": "-- ============================================================================\r\n-- Yamaha QY100 \u2014 Electra One companion script\r\n-- Upload separately:  node bin/e1.js push projects/yamaha_qy100/lua/qy100.lua -b B -s S\r\n-- ============================================================================\r\n\r\nprint(\"QY100 script loaded\")\r\n\r\nlocal OUT = PORT_1\r\nlocal activePart = 1\r\n\r\n-- Controls on Part / Tone / Sends pages whose deviceId follows the Part list\r\nlocal FOCUS_CTRLS = {\r\n    701, 702, 703, 704, 705, 706, 707, 708, 709, 730,\r\n    710, 711, 712, 713, 714, 715, 716, 717, 718, 719, 720,\r\n}\r\n\r\nlocal function clamp(v, lo, hi)\r\n    if v < lo then return lo end\r\n    if v > hi then return hi end\r\n    return v\r\nend\r\n\r\nlocal function sysex(bytes)\r\n    midi.sendSysex(OUT, bytes)\r\nend\r\n\r\n-- Rebind focused-part controls to device id == part (1..16)\r\nlocal function rebindPart(part)\r\n    activePart = clamp(part, 1, 16)\r\n    for _, id in ipairs(FOCUS_CTRLS) do\r\n        local ctrl = controls.get(id)\r\n        if ctrl then\r\n            local val = ctrl:getValue(\"value\")\r\n            if val then\r\n                local msg = val:getMessage()\r\n                if msg then\r\n                    msg:setDeviceId(activePart)\r\n                end\r\n            end\r\n        end\r\n    end\r\n    info.setText(string.format(\"Part %d\", activePart))\r\nend\r\n\r\n-- Part selector (list values 0..15)\r\nfunction onPartSelect(valueObject, value)\r\n    rebindPart(value + 1)\r\nend\r\n\r\nfunction onSongSelect(valueObject, value)\r\n    midi.sendMessage(OUT, { 0xF3, clamp(value, 0, 127) })\r\n    info.setText(string.format(\"Song %d\", value + 1))\r\nend\r\n\r\nfunction onPatternSelect(valueObject, value)\r\n    midi.sendMessage(OUT, { 0xF3, clamp(value, 0, 127) })\r\n    info.setText(string.format(\"Pattern %d\", value + 1))\r\nend\r\n\r\n-- Transport realtime (FA start / FC stop). Pad function fires on press (value\u22600).\r\nfunction onPlay(valueObject, value)\r\n    if value ~= 0 then\r\n        midi.sendMessage(OUT, { 0xFA })\r\n        info.setText(\"PLAY\")\r\n    end\r\nend\r\n\r\nfunction onStop(valueObject, value)\r\n    if value ~= 0 then\r\n        midi.sendMessage(OUT, { 0xFC })\r\n        info.setText(\"STOP\")\r\n    end\r\nend\r\n\r\n-- Style sections: F0 43 7E 00 ss 7F F7\r\n-- Requires QY100 in Pattern/Song play; MIDI Control reception enabled.\r\nlocal function section(ss, label)\r\n    sysex({ 0x43, 0x7E, 0x00, ss, 0x7F })\r\n    info.setText(label or \"Section\")\r\nend\r\n\r\nfunction sectionIntro(valueObject, value)   if value ~= 0 then section(0x08, \"INTRO\") end end\r\nfunction sectionMainA(valueObject, value)   if value ~= 0 then section(0x09, \"MAIN A\") end end\r\nfunction sectionMainB(valueObject, value)   if value ~= 0 then section(0x0A, \"MAIN B\") end end\r\nfunction sectionFillAB(valueObject, value)  if value ~= 0 then section(0x0B, \"FILL AB\") end end\r\nfunction sectionFillBA(valueObject, value)  if value ~= 0 then section(0x0C, \"FILL BA\") end end\r\nfunction sectionEnding(valueObject, value)  if value ~= 0 then section(0x0D, \"ENDING\") end end\r\nfunction sectionBlank(valueObject, value)   if value ~= 0 then section(0x0E, \"BLANK\") end end\r\n\r\nfunction onMasterVolume(valueObject, value)\r\n    sysex({ 0x7F, 0x7F, 0x04, 0x01, 0x00, clamp(value, 0, 127) })\r\nend\r\n\r\nfunction onTranspose(valueObject, value)\r\n    local semi = clamp(value, -24, 24)\r\n    sysex({ 0x43, 0x10, 0x4C, 0x00, 0x00, 0x04, 0x40 + semi })\r\nend\r\n\r\n-- Sys Mode / Sys Panic pages \u2014 one-shot pads only\r\nfunction onXgOn(valueObject, value)\r\n    if value ~= 0 then\r\n        sysex({ 0x43, 0x10, 0x4C, 0x00, 0x00, 0x7E, 0x00 })\r\n        info.setText(\"XG System On\")\r\n    end\r\nend\r\n\r\nfunction onGmOn(valueObject, value)\r\n    if value ~= 0 then\r\n        sysex({ 0x7E, 0x7F, 0x09, 0x01 })\r\n        info.setText(\"GM Mode On\")\r\n    end\r\nend\r\n\r\nfunction onAllSoundOff(valueObject, value)\r\n    if value == 0 then return end\r\n    for ch = 1, 16 do\r\n        midi.sendControlChange(OUT, ch, 120, 0)\r\n    end\r\n    info.setText(\"All Sound Off\")\r\nend\r\n\r\nfunction onAllNotesOff(valueObject, value)\r\n    if value == 0 then return end\r\n    for ch = 1, 16 do\r\n        midi.sendControlChange(OUT, ch, 123, 0)\r\n    end\r\n    info.setText(\"All Notes Off\")\r\nend\r\n\r\nfunction onResetControllers(valueObject, value)\r\n    if value == 0 then return end\r\n    for ch = 1, 16 do\r\n        midi.sendControlChange(OUT, ch, 121, 0)\r\n    end\r\n    info.setText(\"Reset Controllers\")\r\nend\r\n\r\nfunction onAllParamReset(valueObject, value)\r\n    if value == 0 then return end\r\n    sysex({ 0x43, 0x10, 0x4C, 0x00, 0x00, 0x7F, 0x00 })\r\n    info.setText(\"All Param Reset\")\r\nend\r\n\r\n-- Global FX via XG parameter change\r\nlocal function xg(ah, am, al, data)\r\n    local msg = { 0x43, 0x10, 0x4C, ah, am, al }\r\n    for i = 1, #data do msg[#msg + 1] = data[i] end\r\n    sysex(msg)\r\nend\r\n\r\nlocal REVERB = {\r\n    [0] = {0x00,0x00}, [1]={0x01,0x00}, [2]={0x01,0x01}, [3]={0x02,0x00},\r\n    [4]={0x02,0x01}, [5]={0x02,0x02}, [6]={0x03,0x00}, [7]={0x03,0x01},\r\n    [8]={0x04,0x00}, [9]={0x10,0x00}, [10]={0x11,0x00}, [11]={0x13,0x00},\r\n}\r\nlocal CHORUS = {\r\n    [0]={0x00,0x00}, [1]={0x41,0x00}, [2]={0x41,0x01}, [3]={0x41,0x02},\r\n    [4]={0x41,0x08}, [5]={0x42,0x00}, [6]={0x42,0x01}, [7]={0x42,0x02},\r\n    [8]={0x42,0x08}, [9]={0x43,0x00}, [10]={0x43,0x01}, [11]={0x43,0x08},\r\n}\r\nlocal VARI = {\r\n    [0]={0x00,0x00}, [1]={0x05,0x00}, [2]={0x06,0x00}, [3]={0x07,0x00},\r\n    [4]={0x08,0x00}, [5]={0x41,0x00}, [6]={0x43,0x00}, [7]={0x44,0x00},\r\n    [8]={0x45,0x00}, [9]={0x46,0x00}, [10]={0x47,0x00}, [11]={0x48,0x00},\r\n    [12]={0x49,0x00}, [13]={0x4A,0x00}, [14]={0x4B,0x00}, [15]={0x4E,0x00},\r\n    [16]={0x40,0x00},\r\n}\r\n\r\nfunction onReverbType(valueObject, value)\r\n    local t = REVERB[value] or REVERB[0]\r\n    xg(0x02, 0x01, 0x00, { t[1] })\r\n    xg(0x02, 0x01, 0x01, { t[2] })\r\nend\r\n\r\nfunction onReverbReturn(valueObject, value)\r\n    xg(0x02, 0x01, 0x0C, { clamp(value, 0, 127) })\r\nend\r\n\r\nfunction onReverbPan(valueObject, value)\r\n    xg(0x02, 0x01, 0x0D, { clamp(value, 0, 127) })\r\nend\r\n\r\nfunction onChorusType(valueObject, value)\r\n    local t = CHORUS[value] or CHORUS[0]\r\n    xg(0x02, 0x01, 0x20, { t[1] })\r\n    xg(0x02, 0x01, 0x21, { t[2] })\r\nend\r\n\r\nfunction onChorusReturn(valueObject, value)\r\n    xg(0x02, 0x01, 0x2C, { clamp(value, 0, 127) })\r\nend\r\n\r\nfunction onChorusPan(valueObject, value)\r\n    xg(0x02, 0x01, 0x2D, { clamp(value, 0, 127) })\r\nend\r\n\r\nfunction onChorusToRev(valueObject, value)\r\n    xg(0x02, 0x01, 0x2E, { clamp(value, 0, 127) })\r\nend\r\n\r\nfunction onVarType(valueObject, value)\r\n    local t = VARI[value] or VARI[0]\r\n    xg(0x02, 0x01, 0x40, { t[1] })\r\n    xg(0x02, 0x01, 0x41, { t[2] })\r\nend\r\n\r\nfunction onVarReturn(valueObject, value)\r\n    xg(0x02, 0x01, 0x56, { clamp(value, 0, 127) })\r\nend\r\n\r\nfunction onVarPan(valueObject, value)\r\n    xg(0x02, 0x01, 0x57, { clamp(value, 0, 127) })\r\nend\r\n\r\nfunction onVarToRev(valueObject, value)\r\n    xg(0x02, 0x01, 0x58, { clamp(value, 0, 127) })\r\nend\r\n\r\nfunction onVarToCho(valueObject, value)\r\n    xg(0x02, 0x01, 0x59, { clamp(value, 0, 127) })\r\nend\r\n\r\nfunction onVarConnection(valueObject, value)\r\n    xg(0x02, 0x01, 0x5A, { clamp(value, 0, 1) })\r\nend\r\n\r\nfunction preset.onReady()\r\n    rebindPart(1)\r\nend\r\n",
+  "devices": [
+    {
+      "id": 1,
+      "name": "Yamaha QY100",
+      "instrumentId": "generic-controls",
+      "port": 1,
+      "channel": 1
+    }
+  ],
+  "tiles": [
+    {
+      "id": "81661e36-aa50-4d2a-86ca-ef1dc313a91d",
+      "reference": 1,
+      "slotId": 1,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "22C55E",
+      "name": "PLAY",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "start",
+            "deviceId": 1
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "77ca7aeb-e240-4d2a-a789-db533a08c32d",
+      "reference": 2,
+      "slotId": 2,
+      "type": "pad",
+      "deviceId": 1,
+      "color": "EF4444",
+      "name": "STOP",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "stop",
+            "deviceId": 1
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": "momentary"
+    },
+    {
+      "id": "edc625d8-1970-4285-9a1a-248a0151364e",
+      "reference": 3,
+      "slotId": 3,
+      "type": "list",
+      "deviceId": 1,
+      "color": "FFFFFF",
+      "name": "Song",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 0,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": ""
+    },
+    {
+      "id": "185dc446-30ab-4214-b194-d1c83fd21dff",
+      "reference": 4,
+      "slotId": 4,
+      "type": "list",
+      "deviceId": 1,
+      "color": "94A3B8",
+      "name": "Pattern",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 0,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": ""
+    },
+    {
+      "id": "0406ebd8-d095-4ab8-80f4-045fc7a13885",
+      "reference": 5,
+      "slotId": 5,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "06B6D4",
+      "name": "P1 Vol",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 0,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "093a47e4-b88d-4be4-a187-5e192bb5e70d",
+      "reference": 6,
+      "slotId": 6,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "06B6D4",
+      "name": "P2 Vol",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 0,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "67164308-4e6e-4163-9428-05a55d912aca",
+      "reference": 7,
+      "slotId": 7,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "06B6D4",
+      "name": "P3 Vol",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 0,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "8a761590-03be-463e-b7dc-da4962583a51",
+      "reference": 8,
+      "slotId": 8,
+      "type": "fader",
+      "deviceId": 1,
+      "color": "06B6D4",
+      "name": "P4 Vol",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 0,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "thin",
+      "mode": ""
+    },
+    {
+      "id": "21789fe3-2d39-4454-8fb4-2f8f21534ef0",
+      "reference": 9,
+      "slotId": 9,
+      "type": "list",
+      "deviceId": 1,
+      "color": "A3E635",
+      "name": "Part",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 0,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": ""
+    },
+    {
+      "id": "aeb9b9d3-160b-49c7-a257-e37b0323bc58",
+      "reference": 10,
+      "slotId": 10,
+      "type": "list",
+      "deviceId": 1,
+      "color": "A3E635",
+      "name": "Program",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 0,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": ""
+    },
+    {
+      "id": "47f9947d-b20d-4626-900a-a79b8f9e0ac5",
+      "reference": 11,
+      "slotId": 11,
+      "type": "list",
+      "deviceId": 1,
+      "color": "22C55E",
+      "name": "Mode",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 0,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": ""
+    },
+    {
+      "id": "cfcb5ec9-5161-471c-843f-872645269ac4",
+      "reference": 12,
+      "slotId": 12,
+      "type": "list",
+      "deviceId": 1,
+      "color": "EF4444",
+      "name": "Panic",
+      "categoryId": "control",
+      "values": [
+        {
+          "message": {
+            "type": "cc7",
+            "deviceId": 1,
+            "parameterNumber": 0,
+            "min": 0,
+            "max": 127
+          }
+        }
+      ],
+      "visible": true,
+      "variant": "",
+      "mode": ""
+    }
+  ],
+  "pages": [
+    {
+      "id": 1,
+      "name": "QY100 Overview"
+    }
+  ],
+  "categories": [],
+  "firstPageId": 1
+}
