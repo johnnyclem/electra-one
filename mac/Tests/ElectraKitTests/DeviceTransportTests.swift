@@ -1,4 +1,4 @@
-import Testing
+import XCTest
 import Foundation
 @testable import ElectraKit
 
@@ -30,84 +30,84 @@ final class MockTransport: E1TransportProtocol, @unchecked Sendable {
     }
 }
 
-@Suite struct DeviceTransportTests {
+final class DeviceTransportTests: XCTestCase {
 
-    @Test func connectAndDisconnectHappyPath() async throws {
+    func test_connectAndDisconnectHappyPath() async throws {
         let transport = MockTransport()
         let device = E1Device(transport: transport)
         let ports = try await device.connect()
-        #expect(ports.input == "Mock In")
-        #expect(ports.output == "Mock Out")
-        #expect(await device.isConnected)
+        XCTAssertEqual(ports.input, "Mock In")
+        XCTAssertEqual(ports.output, "Mock Out")
+        XCTAssert(await device.isConnected)
         await device.disconnect()
-        #expect(!(await device.isConnected))
+        XCTAssert(!(await device.isConnected))
     }
 
-    @Test func getInfoDecodesDeviceInfo() async throws {
+    func test_getInfoDecodesDeviceInfo() async throws {
         let transport = MockTransport()
         let json = #"{"model":"mk2","versionText":"4.0.0","serial":"E1-123"}"#
         transport.queryPayloads = [Array(json.utf8)]
         let device = E1Device(transport: transport)
         let info = try await device.getInfo()
-        #expect(info.model == "mk2")
-        #expect(info.versionText == "4.0.0")
-        #expect(info.serial == "E1-123")
-        #expect(info.modelUpper == "MK2")
+        XCTAssertEqual(info.model, "mk2")
+        XCTAssertEqual(info.versionText, "4.0.0")
+        XCTAssertEqual(info.serial, "E1-123")
+        XCTAssertEqual(info.modelUpper, "MK2")
         // The request on the wire was an info request.
-        #expect(transport.sent.first == E1Proto.infoRequest())
+        XCTAssertEqual(transport.sent.first, E1Proto.infoRequest())
     }
 
-    @Test func getPresetRawThrowsEmptyForEmptySlot() async {
+    func test_getPresetRawThrowsEmptyForEmptySlot() async {
         let transport = MockTransport()
         transport.queryPayloads = [[]]
         let device = E1Device(transport: transport)
         do {
             _ = try await device.getPresetRaw(bank: 0, slot: 0)
-            Issue.record("expected E1Error.empty")
+            XCTFail(String(describing: "expected E1Error.empty"))
         } catch E1Error.empty {
             // expected
         } catch {
-            Issue.record("expected E1Error.empty, got \(error)")
+            XCTFail(String(describing: "expected E1Error.empty, got \(error))")
         }
     }
 
-    @Test func getLuaThrowsEmptyForEmptySlot() async {
+    func test_getLuaThrowsEmptyForEmptySlot() async {
         let transport = MockTransport()
         transport.queryPayloads = [[]]
         let device = E1Device(transport: transport)
         do {
             _ = try await device.getLua(bank: 0, slot: 0)
-            Issue.record("expected E1Error.empty")
+            XCTFail(String(describing: "expected E1Error.empty"))
         } catch E1Error.empty {
             // expected
         } catch {
-            Issue.record("expected E1Error.empty, got \(error)")
+            XCTFail(String(describing: "expected E1Error.empty, got \(error))")
         }
     }
 
-    @Test func getLuaThrowsDecodeForNonUTF8Payload() async {
+    func test_getLuaThrowsDecodeForNonUTF8Payload() async {
         let transport = MockTransport()
         transport.queryPayloads = [[0xFF, 0xFE, 0xFD]]   // not valid UTF-8
         let device = E1Device(transport: transport)
         do {
             _ = try await device.getLua(bank: 0, slot: 0)
-            Issue.record("expected E1Error.decode")
+            XCTFail(String(describing: "expected E1Error.decode"))
         } catch E1Error.decode {
             // expected
         } catch {
-            Issue.record("expected E1Error.decode, got \(error)")
+            XCTFail(String(describing: "expected E1Error.decode, got \(error))")
         }
     }
 
-    @Test func getLuaReturnsScriptText() async throws {
+    func test_getLuaReturnsScriptText() async throws {
         let transport = MockTransport()
         transport.queryPayloads = [Array("print(1)".utf8)]
         let device = E1Device(transport: transport)
         let lua = try await device.getLua(bank: 0, slot: 0)
-        #expect(lua == "print(1)")
+        XCTAssertEqual(lua, "print(1)")
     }
 
-    @Test func scanSlotClassifiesOkEmptyErrorAndTimeout() async {
+    func test_scanSlotClassifiesOkEmptyErrorAndTimeout() async {
         let transport = MockTransport()
         transport.queryPayloads = [
             Array(#"{"name":"Bass","pages":[{"id":1}],"controls":[]}"#.utf8),  // ok
@@ -117,18 +117,18 @@ final class MockTransport: E1TransportProtocol, @unchecked Sendable {
         let device = E1Device(transport: transport)
 
         let ok = await device.scanSlot(bank: 0, slot: 0)
-        #expect(ok.status == .ok)
-        #expect(ok.name == "Bass")
+        XCTAssertEqual(ok.status, .ok)
+        XCTAssertEqual(ok.name, "Bass")
 
         let empty = await device.scanSlot(bank: 0, slot: 1)
-        #expect(empty.status == .empty)
+        XCTAssertEqual(empty.status, .empty)
 
         let bad = await device.scanSlot(bank: 0, slot: 2)
-        #expect(bad.status == .error)
-        #expect(bad.error != nil)
+        XCTAssertEqual(bad.status, .error)
+        XCTAssertNotEqual(bad.error, nil)
 
         // Payloads exhausted → the mock times out → scanned as empty.
         let timedOut = await device.scanSlot(bank: 0, slot: 3)
-        #expect(timedOut.status == .empty)
+        XCTAssertEqual(timedOut.status, .empty)
     }
 }

@@ -89,6 +89,23 @@ final class AppModel: ObservableObject {
     @Published var savePickerPresented = false
     @Published var saveBank = 0
     @Published var saveSlot = 0
+    /// When false, upload arms the slot but does not switch the live preset.
+    @Published var activateAfterSave: Bool = UserDefaults.standard.object(forKey: "activateAfterSave") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(activateAfterSave, forKey: "activateAfterSave") }
+    }
+
+    // Design chrome
+    @Published var showMiniGuide: Bool = UserDefaults.standard.object(forKey: "showMiniGuide") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showMiniGuide, forKey: "showMiniGuide") }
+    }
+    @Published var showRawJSON: Bool = false
+    @Published var rawJSONText: String = ""
+    @Published var rawJSONError: String?
+
+    // MIDI activity log (CTRL port traffic we observe while connected)
+    @Published var midiLogPresented = false
+    @Published var midiLogLines: [String] = []
+    private let midiLogLimit = 200
 
     // Undo / redo (document snapshots)
     @Published private(set) var canUndo = false
@@ -235,6 +252,7 @@ final class AppModel: ObservableObject {
                 }
                 loadDocument(doc, fileURL: nil, deviceSlot: (targetBank, slot))
                 openSlot = slot   // only mark the slot open once the load succeeded
+                appendMidiLog("Loaded bank \(targetBank) slot \(slot) “\(doc.name)” (\(doc.allControls().count) controls)")
                 message = "Opened \"\(doc.name)\"."
             } catch let e as E1Error where isEmpty(e) {
                 message = "Slot \(slot) is empty. Use New Preset to build one, then Save to Device."
@@ -610,12 +628,16 @@ final class AppModel: ObservableObject {
         let json = doc.jsonString(pretty: false, forDevice: true)
         let lua = doc.lua
         let b = saveBank, s = saveSlot
+        let activate = activateAfterSave
         let luaNote = (lua?.isEmpty == false) ? " + Lua" : ""
         run("Uploading \"\(doc.name)\"\(luaNote) → bank \(b), slot \(s)…") {
             try await self.device.putProject(json: json, lua: lua, bank: b, slot: s)
-            // Auto-load: switch the controller to the slot we just wrote so it
-            // becomes the live preset (Set-slot only arms; Switch-slot loads).
-            try await self.device.activateSlot(bank: b, slot: s)
+            self.appendMidiLog("Uploaded “\(doc.name)” → bank \(b) slot \(s)\(luaNote)")
+            // Optional auto-load: Switch-slot makes the write the live preset.
+            if activate {
+                try await self.device.activateSlot(bank: b, slot: s)
+                self.appendMidiLog("Activated bank \(b) slot \(s)")
+            }
             // Adopt the pushed preset as the open document (especially when we
             // synthesized one) so subsequent edits/pushes target the same slot.
             if synthesized || self.document == nil {
@@ -627,8 +649,51 @@ final class AppModel: ObservableObject {
             self.bank = b
             self.openSlot = s
             self.rescan(announce: false)
-            return "Pushed \"\(doc.name)\"\(luaNote) → bank \(b), slot \(s) and loaded it."
+            let actNote = activate ? " and loaded it" : " (not activated)"
+            return "Pushed \"\(doc.name)\"\(luaNote) → bank \(b), slot \(s)\(actNote)."
         }
+    }
+
+    func appendMidiLog(_ line: String) {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        midiLogLines.append("[\(stamp)] \(line)")
+        if midiLogLines.count > midiLogLimit {
+            midiLogLines.removeFirst(midiLogLines.count - midiLogLimit)
+        }
+    }
+
+    func clearMidiLog() { midiLogLines.removeAll() }
+
+    /// Refresh the raw JSON side panel from the current document.
+    func refreshRawJSON() {
+        guard let doc = document else {
+            rawJSONText = ""
+            rawJSONError = nil
+            return
+        }
+        rawJSONText = doc.jsonString(pretty: true, forDevice: false)
+        rawJSONError = nil
+    }
+
+    /// Apply raw JSON text back into the document (preserves in-memory Lua).
+    func applyRawJSON() {
+        guard document != nil else { return }
+        var probe = document!
+        guard probe.replaceRoot(fromJSON: rawJSONText) else {
+            rawJSONError = "Invalid JSON object."
+            return
+        }
+        rawJSONError = nil
+        edit { doc in
+            _ = doc.replaceRoot(fromJSON: rawJSONText)
+        }
+        if let doc = document, !doc.pages.contains(where: { $0.id == currentPageId }) {
+            currentPageId = doc.pages.first?.id ?? 1
+        }
+        selectedControlId = nil
+        selectedConnectorId = nil
+        refreshRawJSON()
+        message = "Applied raw JSON."
     }
 
     // ── Editing ─────────────────────────────────────────────────────────────
@@ -693,6 +758,38 @@ final class AppModel: ObservableObject {
     func setControlType(_ id: Int, _ type: String) { edit { $0.setControlType(id: id, type) } }
     func setControlParameterNumber(_ id: Int, _ n: Int) { edit { $0.setMessageParameterNumber(id: id, n) } }
     func setControlMessageType(_ id: Int, _ t: String) { edit { $0.setMessageType(id: id, t) } }
+    func setControlFunctionName(_ id: Int, _ name: String) { edit { $0.setFunctionName(id: id, name) } }
+    func setControlPotId(_ id: Int, _ pot: Int?) { edit { $0.setPotId(id: id, pot) } }
+    func setControlMode(_ id: Int, _ mode: String?) { edit { $0.setControlMode(id: id, mode) } }
+    func setControlOnValue(_ id: Int, _ v: Int?) { edit { $0.setOnValue(id: id, v) } }
+    func setControlOffValue(_ id: Int, _ v: Int?) { edit { $0.setOffValue(id: id, v) } }
+    func setControlMessageMinMax(_ id: Int, min: Int?, max: Int?) {
+        edit { $0.setMessageMinMax(id: id, min: min, max: max) }
+    }
+    func setControlMessageDeviceId(_ id: Int, _ deviceId: Int) {
+        edit { $0.setMessageDeviceId(id: id, deviceId) }
+    }
+
+    func setValueParameterNumber(_ controlId: Int, valueId: String, _ n: Int) {
+        edit { $0.setValueParameterNumber(controlId: controlId, valueId: valueId, n) }
+    }
+    func setValueMessageType(_ controlId: Int, valueId: String, _ t: String) {
+        edit { $0.setValueMessageType(controlId: controlId, valueId: valueId, t) }
+    }
+    func setValueFunctionName(_ controlId: Int, valueId: String, _ name: String) {
+        edit { $0.setValueFunctionName(controlId: controlId, valueId: valueId, name) }
+    }
+    func setValueMinMax(_ controlId: Int, valueId: String, min: Int?, max: Int?) {
+        edit { $0.setValueMinMax(controlId: controlId, valueId: valueId, min: min, max: max) }
+    }
+    func setValueOnOff(_ controlId: Int, valueId: String, on: Int?, off: Int?) {
+        edit { $0.setValueOnOff(controlId: controlId, valueId: valueId, on: on, off: off) }
+    }
+
+    func setDeviceName(_ id: Int, _ name: String) { edit { $0.setDeviceName(id: id, name) } }
+    func setDevicePort(_ id: Int, _ port: Int) { edit { $0.setDevicePort(id: id, port) } }
+    func setDeviceChannel(_ id: Int, _ channel: Int) { edit { $0.setDeviceChannel(id: id, channel) } }
+    func setDeviceRate(_ id: Int, _ rate: Int?) { edit { $0.setDeviceRate(id: id, rate) } }
 
     func setControlBounds(_ id: Int, x: Double, y: Double, w: Double, h: Double) {
         edit { $0.setControlBounds(id: id, x: x, y: y, w: w, h: h) }
@@ -700,6 +797,13 @@ final class AppModel: ObservableObject {
 
     func setPresetName(_ name: String) { edit { $0.name = name } }
     func renamePage(_ id: Int, _ name: String) { edit { $0.renamePage(id: id, to: name) } }
+    func addPage() {
+        edit { doc in
+            let id = doc.addPage()
+            DispatchQueue.main.async { self.currentPageId = id }
+        }
+        message = "Added page."
+    }
 
     func addControl(kind: PresetDocument.ControlKind = .fader) {
         var createdId: Int?
@@ -877,10 +981,6 @@ final class AppModel: ObservableObject {
                 seedCustomPaint(controlId: id, colorHex: document?.control(id: id)?.colorHex ?? "FFFFFF")
             }
         }
-    }
-
-    func setValueParameterNumber(_ controlId: Int, valueId: String, _ n: Int) {
-        edit { $0.setValueParameterNumber(controlId: controlId, valueId: valueId, n) }
     }
 
     func deleteSelectedControl() {

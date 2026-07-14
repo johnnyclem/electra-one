@@ -1,8 +1,8 @@
-import Testing
+import XCTest
 import Foundation
 @testable import ElectraKit
 
-@Suite struct PresetDocumentTests {
+final class PresetDocumentTests: XCTestCase {
 
     /// A minimal but realistic device preset with two controls.
     static let presetJSON = """
@@ -34,78 +34,78 @@ import Foundation
         return doc
     }
 
-    @Test func parseTopLevel() {
+    func test_parseTopLevel() {
         let doc = makeDoc()
-        #expect(doc.name == "Demo")
-        #expect(doc.version == 2)
-        #expect(doc.projectId == "abc123")
-        #expect(doc.pages.map(\.id) == [1, 2])
-        #expect(doc.deviceNames == ["Synth"])
-        #expect(doc.allControls().count == 2)
+        XCTAssertEqual(doc.name, "Demo")
+        XCTAssertEqual(doc.version, 2)
+        XCTAssertEqual(doc.projectId, "abc123")
+        XCTAssertEqual(doc.pages.map(\.id), [1, 2])
+        XCTAssertEqual(doc.deviceNames, ["Synth"])
+        XCTAssertEqual(doc.allControls().count, 2)
     }
 
-    @Test func rejectsInvalidJSON() {
-        #expect(PresetDocument(jsonString: "{ not json") == nil)
-        #expect(PresetDocument(jsonString: "[1,2,3]") == nil)  // array, not an object
+    func test_rejectsInvalidJSON() {
+        XCTAssertEqual(PresetDocument(jsonString: "{ not json"), nil)
+        XCTAssertEqual(PresetDocument(jsonString: "[1,2,3]"), nil)  // array, not an object
     }
 
-    @Test func controlParsingAndKind() {
+    func test_controlParsingAndKind() {
         let doc = makeDoc()
         let cutoff = doc.control(id: 1)!
-        #expect(cutoff.name == "Cutoff")
-        #expect(cutoff.kind == .fader)
-        #expect(cutoff.parameterNumber == 74)
-        #expect(cutoff.potId == 1)
-        #expect(cutoff.x == 20)
+        XCTAssertEqual(cutoff.name, "Cutoff")
+        XCTAssertEqual(cutoff.kind, .fader)
+        XCTAssertEqual(cutoff.parameterNumber, 74)
+        XCTAssertEqual(cutoff.potId, 1)
+        XCTAssertEqual(cutoff.x, 20)
         // fader + "dial" variant → knob
-        #expect(doc.control(id: 2)!.kind == .knob)
+        XCTAssertEqual(doc.control(id: 2)!.kind, .knob)
     }
 
-    @Test func controlsFilteredByPage() {
+    func test_controlsFilteredByPage() {
         let doc = makeDoc()
-        #expect(doc.controls(onPage: 1).map(\.id) == [1])
-        #expect(doc.controls(onPage: 2).map(\.id) == [2])
+        XCTAssertEqual(doc.controls(onPage: 1).map(\.id), [1])
+        XCTAssertEqual(doc.controls(onPage: 2).map(\.id), [2])
     }
 
-    @Test func roundTripPreservesAllTopLevelKeys() {
+    func test_roundTripPreservesAllTopLevelKeys() {
         let doc = makeDoc()
         func keys(_ s: String) -> Set<String> {
             guard let o = (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any] else { return [] }
             return Set(o.keys)
         }
-        #expect(keys(Self.presetJSON) == keys(doc.jsonString()))
+        XCTAssertEqual(keys(Self.presetJSON), keys(doc.jsonString()))
     }
 
-    @Test func targetedEditLeavesOtherControlsUntouched() {
+    func test_targetedEditLeavesOtherControlsUntouched() {
         var doc = makeDoc()
         doc.setControlName(id: 1, "Renamed")
         doc.setControlColor(id: 1, hex: "03A598")
-        #expect(doc.control(id: 1)!.name == "Renamed")
-        #expect(doc.control(id: 1)!.colorHex == "03A598")
-        #expect(doc.control(id: 2)!.name == "Res")  // sibling untouched
-        #expect(doc.allControls().count == 2)
+        XCTAssertEqual(doc.control(id: 1)!.name, "Renamed")
+        XCTAssertEqual(doc.control(id: 1)!.colorHex, "03A598")
+        XCTAssertEqual(doc.control(id: 2)!.name, "Res")  // sibling untouched
+        XCTAssertEqual(doc.allControls().count, 2)
     }
 
-    @Test func setMessageParameterNumberAndType() {
+    func test_setMessageParameterNumberAndType() {
         var doc = makeDoc()
         doc.setMessageParameterNumber(id: 1, 99)
         doc.setMessageType(id: 1, "nrpn")
         let c = doc.control(id: 1)!
-        #expect(c.parameterNumber == 99)
-        #expect(c.messageType == "nrpn")
+        XCTAssertEqual(c.parameterNumber, 99)
+        XCTAssertEqual(c.messageType, "nrpn")
     }
 
-    @Test func addControlLandsInNextFreeCell() {
+    func test_addControlLandsInNextFreeCell() {
         var doc = makeDoc()
         let id = doc.addControl(kind: .fader, pageId: 1)
         let c = doc.control(id: id)!
         // page 1 had 1 control, so the new one occupies grid slot 2.
-        #expect(c.pageId == 1)
-        #expect([c.x, c.y, c.w, c.h] == [20 + 196, 36, 175, 122])
-        #expect(c.kind == .fader)
+        XCTAssertEqual(c.pageId, 1)
+        XCTAssertEqual([c.x, c.y, c.w, c.h], [20 + 196, 36, 175, 122])
+        XCTAssertEqual(c.kind, .fader)
     }
 
-    @Test func placementNeverOverlapsAfterDeletion() {
+    func test_placementNeverOverlapsAfterDeletion() {
         var doc = PresetDocument.newPreset()
         let a = doc.addControl(pageId: 1)   // slot 1
         _ = doc.addControl(pageId: 1)       // slot 2
@@ -114,93 +114,93 @@ import Foundation
         let d = doc.addControl(pageId: 1)   // must reuse slot 1, not land on slot 3
 
         let added = doc.control(id: d)!
-        #expect([added.x, added.y] == [20, 36])   // the freed origin slot
+        XCTAssertEqual([added.x, added.y], [20, 36])   // the freed origin slot
         // No two controls share an origin.
         let origins = doc.allControls().map { [$0.x, $0.y] }
-        #expect(Set(origins.map { "\($0)" }).count == origins.count)
+        XCTAssertEqual(Set(origins.map { "\($0)" }).count, origins.count)
     }
 
-    @Test func placementSkipsColumnsSpannedByWideControls() {
+    func test_placementSkipsColumnsSpannedByWideControls() {
         var doc = PresetDocument.newPreset()
         _ = doc.addControl(kind: .custom, pageId: 1)  // spans slots 1+2
         let id = doc.addControl(pageId: 1)
         let c = doc.control(id: id)!
         // The fader must land in slot 3, past the 2-column custom control.
-        #expect([c.x, c.y] == [20 + 2 * 196, 36])
+        XCTAssertEqual([c.x, c.y], [20 + 2 * 196, 36])
     }
 
-    @Test func newControlParameterIsLowestUnusedCC() {
+    func test_newControlParameterIsLowestUnusedCC() {
         var doc = makeDoc()   // fixture already uses CC 74 and 71
         let id = doc.addControl(pageId: 1)
         let c = doc.control(id: id)!
-        #expect(c.parameterNumber == 1)          // lowest unused, not the id
-        #expect(c.name == "CC #1")               // label matches the parameter
+        XCTAssertEqual(c.parameterNumber, 1)          // lowest unused, not the id
+        XCTAssertEqual(c.name, "CC #1")               // label matches the parameter
     }
 
-    @Test func addADSRBuildsFourValues() {
+    func test_addADSRBuildsFourValues() {
         var doc = makeDoc()
         let id = doc.addControl(kind: .adsr, pageId: 1)
         let c = doc.control(id: id)!
-        #expect(c.kind == .adsr)
-        #expect(c.valueCount == 4)
-        #expect(doc.controlValues(id: id).map(\.valueId) == ["attack", "decay", "sustain", "release"])
+        XCTAssertEqual(c.kind, .adsr)
+        XCTAssertEqual(c.valueCount, 4)
+        XCTAssertEqual(doc.controlValues(id: id).map(\.valueId), ["attack", "decay", "sustain", "release"])
     }
 
-    @Test func kindSwitchKnobToADSRAndBack() {
+    func test_kindSwitchKnobToADSRAndBack() {
         var doc = makeDoc()
         doc.setControlKind(id: 2, .adsr)
-        #expect(doc.controlValues(id: 2).count == 4)
+        XCTAssertEqual(doc.controlValues(id: 2).count, 4)
         doc.setControlKind(id: 2, .fader)
-        #expect(doc.controlValues(id: 2).count == 1)  // ADSR collapses back to one value
-        #expect(PresetDocument(jsonString: doc.jsonString()) != nil)
+        XCTAssertEqual(doc.controlValues(id: 2).count, 1)  // ADSR collapses back to one value
+        XCTAssertNotEqual(PresetDocument(jsonString: doc.jsonString()), nil)
     }
 
-    @Test func duplicateControlGetsNewIdAndOffset() {
+    func test_duplicateControlGetsNewIdAndOffset() {
         var doc = makeDoc()
         let newId = doc.duplicateControl(id: 1)
-        #expect(newId != nil)
-        #expect(doc.allControls().count == 3)
+        XCTAssertNotEqual(newId, nil)
+        XCTAssertEqual(doc.allControls().count, 3)
         let dup = doc.control(id: newId!)!
-        #expect(dup.x == 20 + 24)
-        #expect(dup.y == 36 + 24)
-        #expect(dup.name == "Cutoff")
+        XCTAssertEqual(dup.x, 20 + 24)
+        XCTAssertEqual(dup.y, 36 + 24)
+        XCTAssertEqual(dup.name, "Cutoff")
     }
 
-    @Test func removeControl() {
+    func test_removeControl() {
         var doc = makeDoc()
         doc.removeControl(id: 1)
-        #expect(doc.control(id: 1) == nil)
-        #expect(doc.allControls().count == 1)
+        XCTAssertEqual(doc.control(id: 1), nil)
+        XCTAssertEqual(doc.allControls().count, 1)
     }
 
-    @Test func setControlBoundsRoundsToInts() {
+    func test_setControlBoundsRoundsToInts() {
         var doc = makeDoc()
         doc.setControlBounds(id: 1, x: 40.6, y: 50.4, w: 175, h: 122)
         let c = doc.control(id: 1)!
-        #expect(c.x == 41)
-        #expect(c.y == 50)
+        XCTAssertEqual(c.x, 41)
+        XCTAssertEqual(c.y, 50)
     }
 
-    @Test func renamePage() {
+    func test_renamePage() {
         var doc = makeDoc()
         doc.renamePage(id: 2, to: "Renamed")
-        #expect(doc.pages.first { $0.id == 2 }?.name == "Renamed")
+        XCTAssertEqual(doc.pages.first { $0.id, 2 }?.name == "Renamed")
     }
 
-    @Test func addScriptControlBinding() {
+    func test_addScriptControlBinding() {
         var doc = makeDoc()
         let id = doc.addScriptControl(pageId: 1)
         let c = doc.control(id: id)!
-        #expect(c.isScript)
-        #expect(c.functionName == PresetDocument.scriptFunctionName(forControlId: id))
-        #expect(c.type == "pad")
+        XCTAssert(c.isScript)
+        XCTAssertEqual(c.functionName, PresetDocument.scriptFunctionName(forControlId: id))
+        XCTAssertEqual(c.type, "pad")
     }
 
-    @Test func newPresetTemplateIsValid() {
+    func test_newPresetTemplateIsValid() {
         let doc = PresetDocument.newPreset(name: "Fresh")
-        #expect(doc.name == "Fresh")
-        #expect(doc.pages.count == 2)
-        #expect(doc.projectId?.count == 20)
-        #expect(PresetDocument(jsonString: doc.jsonString()) != nil)
+        XCTAssertEqual(doc.name, "Fresh")
+        XCTAssertEqual(doc.pages.count, 2)
+        XCTAssertEqual(doc.projectId?.count, 20)
+        XCTAssertNotEqual(PresetDocument(jsonString: doc.jsonString()), nil)
     }
 }

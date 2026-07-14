@@ -133,10 +133,12 @@ public struct PresetDocument {
         public var deviceId: Int?
         public var minValue: Int?
         public var maxValue: Int?
+        public var onValue: Int?
+        public var offValue: Int?
+        public var mode: String?
         public var valueCount: Int
         public var visible: Bool
-        /// Name of the Lua function this control's value invokes, if any. Script
-        /// buttons are plain `pad`s distinguished only by carrying this binding.
+        /// Name of the Lua function this control's value invokes, if any.
         public var functionName: String?
 
         public var kind: ControlKind { ControlKind.from(type: type, variant: variant) }
@@ -146,6 +148,30 @@ public struct PresetDocument {
 
         /// A Custom control whose graphics are drawn by a Lua paint callback.
         public var isCustom: Bool { kind == .custom }
+    }
+
+    /// One value row on a control (faders have one; ADSR has four).
+    public struct ControlValue: Identifiable, Hashable {
+        public var id: String { valueId }
+        public var valueId: String
+        public var functionName: String?
+        public var messageType: String?
+        public var parameterNumber: Int?
+        public var deviceId: Int?
+        public var minValue: Int?
+        public var maxValue: Int?
+        public var onValue: Int?
+        public var offValue: Int?
+        public var defaultValue: Int?
+    }
+
+    /// A device entry from the preset `devices[]` array.
+    public struct DeviceEntry: Identifiable, Hashable {
+        public var id: Int
+        public var name: String
+        public var port: Int
+        public var channel: Int
+        public var rate: Int?
     }
 
     private static func parseControl(_ c: [String: Any]) -> Control? {
@@ -170,10 +196,26 @@ public struct PresetDocument {
             deviceId: firstMsg?["deviceId"] as? Int,
             minValue: firstMsg?["min"] as? Int,
             maxValue: firstMsg?["max"] as? Int,
+            onValue: firstMsg?["onValue"] as? Int,
+            offValue: firstMsg?["offValue"] as? Int,
+            mode: c["mode"] as? String,
             valueCount: values.count,
             visible: c["visible"] as? Bool ?? true,
             functionName: values.first?["function"] as? String
         )
+    }
+
+    public var devices: [DeviceEntry] {
+        (root["devices"] as? [[String: Any]] ?? []).compactMap { d in
+            guard let id = d["id"] as? Int else { return nil }
+            return DeviceEntry(
+                id: id,
+                name: d["name"] as? String ?? "Device \(id)",
+                port: d["port"] as? Int ?? 1,
+                channel: d["channel"] as? Int ?? 1,
+                rate: d["rate"] as? Int
+            )
+        }
     }
 
     public func allControls() -> [Control] {
@@ -244,33 +286,238 @@ public struct PresetDocument {
         mutateControl(id: id) { $0["type"] = type }
     }
 
-    /// Read each value's id + parameter number (ADSR has four).
-    public func controlValues(id: Int) -> [(valueId: String, parameterNumber: Int?)] {
+    /// Bind or clear the Lua function on the primary value (`values[0].function`).
+    /// Pass empty / whitespace to remove the binding.
+    public mutating func setFunctionName(id: Int, _ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        mutateControl(id: id) { c in
+            var values = c["values"] as? [[String: Any]] ?? []
+            if values.isEmpty { values = [["id": "value", "message": [String: Any]()]] }
+            var v = values[0]
+            if trimmed.isEmpty {
+                v.removeValue(forKey: "function")
+            } else {
+                v["function"] = trimmed
+            }
+            values[0] = v
+            c["values"] = values
+        }
+    }
+
+    /// Bind physical pot 1…12, or pass `nil` to remove the input binding
+    /// (soft-key / touch-only pads use no pot, or pots 9–12 on Mini).
+    public mutating func setPotId(id: Int, _ potId: Int?) {
+        mutateControl(id: id) { c in
+            if let potId, (1...12).contains(potId) {
+                c["inputs"] = [["potId": potId, "valueId": "value"]]
+            } else {
+                c.removeValue(forKey: "inputs")
+            }
+        }
+    }
+
+    /// Pad mode: `"momentary"`, `"toggle"`, or nil/empty to clear.
+    public mutating func setControlMode(id: Int, _ mode: String?) {
+        mutateControl(id: id) { c in
+            let m = mode?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if m.isEmpty {
+                c.removeValue(forKey: "mode")
+            } else {
+                c["mode"] = m
+            }
+        }
+    }
+
+    public mutating func setOnValue(id: Int, _ value: Int?) {
+        mutateFirstMessage(id: id) { m in
+            if let value { m["onValue"] = value } else { m.removeValue(forKey: "onValue") }
+        }
+    }
+
+    public mutating func setOffValue(id: Int, _ value: Int?) {
+        mutateFirstMessage(id: id) { m in
+            if let value { m["offValue"] = value } else { m.removeValue(forKey: "offValue") }
+        }
+    }
+
+    public mutating func setMessageMinMax(id: Int, min: Int?, max: Int?) {
+        mutateFirstMessage(id: id) { m in
+            if let min { m["min"] = min } else { m.removeValue(forKey: "min") }
+            if let max { m["max"] = max } else { m.removeValue(forKey: "max") }
+        }
+    }
+
+    public mutating func setMessageDeviceId(id: Int, _ deviceId: Int) {
+        mutateFirstMessage(id: id) { m in m["deviceId"] = deviceId }
+    }
+
+    private mutating func mutateFirstMessage(id: Int, _ body: (inout [String: Any]) -> Void) {
+        mutateControl(id: id) { c in
+            var values = c["values"] as? [[String: Any]] ?? []
+            if values.isEmpty { values = [["id": "value", "message": [String: Any]()]] }
+            var v = values[0]
+            var m = v["message"] as? [String: Any] ?? [:]
+            body(&m)
+            v["message"] = m
+            values[0] = v
+            c["values"] = values
+        }
+    }
+
+    /// Rich read of every value row (for the multi-value inspector).
+    public func controlValueDetails(id: Int) -> [ControlValue] {
         guard let controls = root["controls"] as? [[String: Any]],
               let c = controls.first(where: { ($0["id"] as? Int) == id }) else { return [] }
         let values = c["values"] as? [[String: Any]] ?? []
         return values.map { v in
             let m = v["message"] as? [String: Any]
-            return (v["id"] as? String ?? "value", m?["parameterNumber"] as? Int)
+            let def: Int?
+            if let i = v["defaultValue"] as? Int { def = i }
+            else if let s = v["defaultValue"] as? String, let i = Int(s) { def = i }
+            else { def = nil }
+            return ControlValue(
+                valueId: v["id"] as? String ?? "value",
+                functionName: v["function"] as? String,
+                messageType: m?["type"] as? String,
+                parameterNumber: m?["parameterNumber"] as? Int,
+                deviceId: m?["deviceId"] as? Int,
+                minValue: m?["min"] as? Int,
+                maxValue: m?["max"] as? Int,
+                onValue: m?["onValue"] as? Int,
+                offValue: m?["offValue"] as? Int,
+                defaultValue: def
+            )
         }
+    }
+
+    /// Read each value's id + parameter number (ADSR has four).
+    public func controlValues(id: Int) -> [(valueId: String, parameterNumber: Int?)] {
+        controlValueDetails(id: id).map { ($0.valueId, $0.parameterNumber) }
     }
 
     /// Set the parameter number of a specific value by id (for multi-value
     /// controls like ADSR).
     public mutating func setValueParameterNumber(controlId: Int, valueId: String, _ number: Int) {
+        mutateValueMessage(controlId: controlId, valueId: valueId) { m in
+            m["parameterNumber"] = number
+        }
+    }
+
+    public mutating func setValueMessageType(controlId: Int, valueId: String, _ type: String) {
+        mutateValueMessage(controlId: controlId, valueId: valueId) { m in
+            m["type"] = type
+        }
+    }
+
+    public mutating func setValueFunctionName(controlId: Int, valueId: String, _ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        mutateControl(id: controlId) { c in
+            var values = c["values"] as? [[String: Any]] ?? []
+            for i in values.indices where (values[i]["id"] as? String) == valueId {
+                var v = values[i]
+                if trimmed.isEmpty { v.removeValue(forKey: "function") }
+                else { v["function"] = trimmed }
+                values[i] = v
+            }
+            c["values"] = values
+        }
+    }
+
+    public mutating func setValueMinMax(controlId: Int, valueId: String, min: Int?, max: Int?) {
+        mutateValueMessage(controlId: controlId, valueId: valueId) { m in
+            if let min { m["min"] = min } else { m.removeValue(forKey: "min") }
+            if let max { m["max"] = max } else { m.removeValue(forKey: "max") }
+        }
+    }
+
+    public mutating func setValueOnOff(controlId: Int, valueId: String, on: Int?, off: Int?) {
+        mutateValueMessage(controlId: controlId, valueId: valueId) { m in
+            if let on { m["onValue"] = on } else { m.removeValue(forKey: "onValue") }
+            if let off { m["offValue"] = off } else { m.removeValue(forKey: "offValue") }
+        }
+    }
+
+    private mutating func mutateValueMessage(
+        controlId: Int, valueId: String, _ body: (inout [String: Any]) -> Void
+    ) {
         let dev = (root["devices"] as? [[String: Any]])?.first?["id"] as? Int ?? 1
         mutateControl(id: controlId) { c in
             var values = c["values"] as? [[String: Any]] ?? []
             for i in values.indices where (values[i]["id"] as? String) == valueId {
                 var v = values[i]
-                var m = v["message"] as? [String: Any] ?? ["type": "cc7", "min": 0, "max": 127, "deviceId": dev]
-                m["parameterNumber"] = number
+                var m = v["message"] as? [String: Any]
+                    ?? ["type": "cc7", "min": 0, "max": 127, "deviceId": dev]
+                body(&m)
                 v["message"] = m
                 values[i] = v
             }
             c["values"] = values
         }
     }
+
+    // ── Devices ──────────────────────────────────────────────────────────────
+
+    public mutating func setDeviceName(id: Int, _ name: String) {
+        mutateDevice(id: id) { $0["name"] = String(name.prefix(20)) }
+    }
+
+    public mutating func setDevicePort(id: Int, _ port: Int) {
+        let p = max(1, min(2, port))
+        mutateDevice(id: id) { $0["port"] = p }
+    }
+
+    public mutating func setDeviceChannel(id: Int, _ channel: Int) {
+        let ch = max(1, min(16, channel))
+        mutateDevice(id: id) { $0["channel"] = ch }
+    }
+
+    public mutating func setDeviceRate(id: Int, _ rate: Int?) {
+        mutateDevice(id: id) { d in
+            if let rate, rate >= 10 {
+                d["rate"] = rate
+            } else {
+                d.removeValue(forKey: "rate")
+            }
+        }
+    }
+
+    private mutating func mutateDevice(id: Int, _ body: (inout [String: Any]) -> Void) {
+        guard var devices = root["devices"] as? [[String: Any]] else { return }
+        for i in devices.indices where (devices[i]["id"] as? Int) == id {
+            var d = devices[i]
+            body(&d)
+            devices[i] = d
+            break
+        }
+        root["devices"] = devices
+    }
+
+    /// Replace the entire root with parsed JSON (power-user raw editor).
+    /// Returns false if the string is not a JSON object.
+    public mutating func replaceRoot(fromJSON string: String) -> Bool {
+        guard let data = string.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+        // Preserve in-memory Lua (not stored in JSON root).
+        let keepLua = lua
+        root = obj
+        lua = keepLua
+        return true
+    }
+
+    /// Add a blank page at the end. Returns the new page id.
+    @discardableResult
+    public mutating func addPage(name: String? = nil) -> Int {
+        var pages = root["pages"] as? [[String: Any]] ?? []
+        let nextId = (pages.compactMap { $0["id"] as? Int }.max() ?? 0) + 1
+        pages.append(["id": nextId, "name": name ?? "Page \(nextId)"])
+        root["pages"] = pages
+        return nextId
+    }
+
+    /// Mini usable design region (soft upper bound for layout guidance).
+    public static let miniCanvasWidth: Double = 480
+    public static let miniCanvasHeight: Double = 320
 
     /// Build the four ADSR inputs + CC values (attack/decay/sustain/release) —
     /// shared by `addControl` and `setControlKind`.

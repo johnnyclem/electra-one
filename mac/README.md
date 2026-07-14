@@ -11,7 +11,8 @@ CoreMIDI (no Node required).
 
 - **Visual editor** — a black "screen" canvas draws each control at its real
   `bounds` with its color and a type-specific graphic (fader bar, pad, list).
-  Page tabs switch pages. Drag a control to reposition it.
+  Page tabs switch pages. Drag a control to reposition it. Optional **Mini
+  guide** (toolbar) shows a 480×320 dashed region for Electra Mini layouts.
 - **Connector arrows** — FigJam/OmniGraffle-style arrows on the canvas. Hover
   (or select) a control and drag from an edge dot to arrow another control, or
   use the inspector's "Link to Page…" to draw an arrow to a floating page pill
@@ -20,9 +21,16 @@ CoreMIDI (no Node required).
   into the preset `.json` under a `connectors` key and round-trip through
   files, but are stripped from device uploads (the firmware doesn't know the
   key), and deleting a control removes its arrows.
-- **Inspector** — select a control to edit its name, color (Electra palette),
-  type, MIDI message (cc7/cc14/nrpn/note/program/…), parameter number, and
-  exact position. Add/delete controls. Rename the preset and pages.
+- **Inspector (bindings)** — select a control to edit:
+  - name, color, kind, position
+  - **Lua function** name (`values[].function`)
+  - **pot id** 1–12 (or none; 9–12 = Mini soft keys)
+  - **mode** momentary/toggle
+  - **MIDI** message type (incl. `virtual`), parameter #, onValue/offValue, min/max, device id
+  - multi-value rows (e.g. ADSR) with per-value param/function/range
+  - **Devices** panel (when nothing selected): name, port 1/2, channel, rate
+- **Raw JSON** — toolbar **JSON** toggles a side panel; Refresh / Apply for
+  power-user edits (Lua script in the editor is preserved on Apply).
 - **Offline** — New Preset / Open File… work with no device. Save to a `.json`
   file. Editing preserves every field of the original JSON, so round-tripping
   never corrupts a preset.
@@ -30,8 +38,10 @@ CoreMIDI (no Node required).
   converted to the editable preset model: `tiles` → controls, `slotId` →
   pixel bounds + page/control-set/pot, and the embedded Lua script is carried
   along. Saving to the device uploads the preset **and** the Lua.
-- **With a device** — browse banks/slots, click a slot to open it in the
-  editor, and Save to Device (pick bank/slot) to upload.
+- **With a device** — browse banks/slots, click a slot to **open/load** it,
+  edit, then **Push to Device**. Optional **Activate after save** (default on).
+  **MIDI log** sheet records load/upload/activate events on the CTRL path.
+- **Script mode** — Lua editor, offline simulator, script library, optional AI.
 
 ## Build & run
 

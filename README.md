@@ -16,7 +16,7 @@ Everything talks to the device over USB MIDI SysEx (manufacturer id
 | `mac/` | Swift package: `ElectraKit` (protocol/device/document), `LuaKit` (embedded Lua simulator), `ElectraOneApp` (SwiftUI app), `e1probe` (headless smoke tool) |
 | `presets/` | Sample preset JSON (v2 format) |
 | `presets/widgets/` | Vendored known-good widget presets (newer editor schema; see its README) |
-| `projects/` | Example `.eproj` editor project (Eventide H9 Max) |
+| `projects/` | Example `.eproj` editor projects (Eventide H9 Max, Yamaha QY100, Valeton VLP-200 Mini) |
 | `scripts/` | Five annotated example Lua scripts (hello world → SysEx patch handler) |
 | `wiki/` | LLM-maintained knowledge base on the Electra One platform (SysEx API, preset format, Lua API) |
 | `docs/TESTING.md` | How the test suites work |

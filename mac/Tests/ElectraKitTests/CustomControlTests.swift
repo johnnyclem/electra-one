@@ -1,4 +1,4 @@
-import Testing
+import XCTest
 import Foundation
 import AppKit
 @testable import ElectraKit
@@ -7,29 +7,29 @@ import AppKit
 /// End-to-end: adding a Custom control and rendering its seeded paint callback
 /// yields draw ops — and we rasterize a couple to PNGs so the pipeline can be
 /// eyeballed (written to $TMPDIR).
-@Suite struct CustomControlTests {
+final class CustomControlTests: XCTestCase {
     let lua = LuaEngine()
 
-    @Test func addingCustomControlProducesDrawableScript() {
+    func test_addingCustomControlProducesDrawableScript() {
         var doc = PresetDocument.newPreset()
         let id = doc.addControl(kind: .custom, pageId: 1)
-        #expect(doc.control(id: id)?.isCustom == true)
+        XCTAssertEqual(doc.control(id: id)?.isCustom, true)
 
         let src = PresetDocument.customPaintStarter(controlId: id, colorHex: "F20530")
         let r = lua.paint(src, controlId: id, width: 200, height: 90, fraction: 0.7)
-        #expect(r.ok, "paint errored: \(r.error ?? "?")")
+        XCTAssert(r.ok, "paint errored: \(r.error ?? "?")")
         // background fill + value bar + label
-        #expect(r.ops.contains { $0.op == "fillRect" })
-        #expect(r.ops.contains { $0.op == "text" })
+        XCTAssertEqual(r.ops.contains { $0.op, "fillRect" })
+        XCTAssertEqual(r.ops.contains { $0.op, "text" })
     }
 
-    @Test func rasterizeStarterAndVUMeterToPNG() {
+    func test_rasterizeStarterAndVUMeterToPNG() {
         // 1) the seeded starter bar
         let starter = PresetDocument.customPaintStarter(controlId: 1, colorHex: "F57000")
         let r1 = lua.paint(starter, controlId: 1, width: 220, height: 90, fraction: 0.66)
-        #expect(r1.ok, "starter paint errored: \(r1.error ?? "?")")
-        #expect(!r1.ops.isEmpty)
-        #expect(write(r1, to: "custom_starter.png", w: 220, h: 90) != nil)
+        XCTAssert(r1.ok, "starter paint errored: \(r1.error ?? "?")")
+        XCTAssert(!r1.ops.isEmpty)
+        XCTAssertNotEqual(write(r1, to: "custom_starter.png", w: 220, h: 90), nil)
 
         // 2) a richer hand-written paint script (ADSR-style envelope)
         let adsr = """
@@ -49,24 +49,24 @@ import AppKit
         end)
         """
         let r2 = lua.paint(adsr, controlId: 1, width: 220, height: 90, fraction: 0.5)
-        #expect(r2.ok, "adsr paint errored: \(r2.error ?? "?")")
-        #expect(!r2.ops.isEmpty)
-        #expect(write(r2, to: "custom_adsr.png", w: 220, h: 90) != nil)
+        XCTAssert(r2.ok, "adsr paint errored: \(r2.error ?? "?")")
+        XCTAssert(!r2.ops.isEmpty)
+        XCTAssertNotEqual(write(r2, to: "custom_adsr.png", w: 220, h: 90), nil)
     }
 
-    @Test func paintStarterSanitizesColorHex() {
+    func test_paintStarterSanitizesColorHex() {
         // A '#'-prefixed color must not leak into the Lua literal.
         let src = PresetDocument.customPaintStarter(controlId: 7, colorHex: "#f20530")
-        #expect(src.contains("0xF20530"))
-        #expect(!src.contains("#F20530"))
-        #expect(lua.check(src) == nil, "starter should compile")
+        XCTAssert(src.contains("0xF20530"))
+        XCTAssert(!src.contains("#F20530"))
+        XCTAssertEqual(lua.check(src), nil, "starter should compile")
         let r = lua.paint(src, controlId: 7, width: 100, height: 50, fraction: 0.5)
-        #expect(r.ok, "paint errored: \(r.error ?? "?")")
-        #expect(!r.ops.isEmpty)
+        XCTAssert(r.ok, "paint errored: \(r.error ?? "?")")
+        XCTAssert(!r.ops.isEmpty)
 
         // Nothing valid left → falls back to white.
         let fallback = PresetDocument.customPaintStarter(controlId: 8, colorHex: "##")
-        #expect(fallback.contains("0xFFFFFF"))
+        XCTAssert(fallback.contains("0xFFFFFF"))
     }
 
     /// Rasterize draw ops with the same op semantics the app's Canvas uses.

@@ -4,43 +4,6 @@ import ElectraKit
 import LuaKit
 import UniformTypeIdentifiers
 
-// MARK: - Theme (from the UX design, hardware-inspired)
-
-enum ElectraTheme {
-    static let background = Color(red: 0.12, green: 0.12, blue: 0.14)
-    static let surface = Color(red: 0.16, green: 0.16, blue: 0.18)
-    static let surfaceSecondary = Color(red: 0.22, green: 0.22, blue: 0.25)
-    static let accent = Color(red: 0.96, green: 0.58, blue: 0.0) // Electra orange
-    static let textSecondary = Color.white.opacity(0.7)
-    static let textTertiary = Color.white.opacity(0.45)
-    static let bezel = Color(red: 0.15, green: 0.15, blue: 0.17)
-    static let bezelHighlight = Color.white.opacity(0.08)
-
-    static let titleFont = Font.system(size: 20, weight: .semibold)
-    static let headlineFont = Font.system(size: 15, weight: .semibold)
-    static let monoFont = Font.system(size: 11, weight: .regular, design: .monospaced)
-
-    static let controlCornerRadius: CGFloat = 4
-    static let bezelCornerRadius: CGFloat = 14
-}
-
-extension Color {
-    init(electraHex hex: String) {
-        var s = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
-        if s.count == 3 { s = s.map { "\($0)\($0)" }.joined() }
-        var v: UInt64 = 0
-        Scanner(string: s).scanHexInt64(&v)
-        self.init(rgb: UInt32(truncatingIfNeeded: v))
-    }
-
-    /// Build a Color from a 24-bit RGB integer (as Electra `graphics` uses).
-    init(rgb: UInt32) {
-        self = Color(red: Double((rgb >> 16) & 0xff) / 255,
-                     green: Double((rgb >> 8) & 0xff) / 255,
-                     blue: Double(rgb & 0xff) / 255)
-    }
-}
-
 // MARK: - Root
 
 struct ContentView: View {
@@ -74,7 +37,11 @@ struct ContentView: View {
                                     BottomBar(zoom: $zoom, showGrid: $showGrid, snapToGrid: $snapToGrid)
                                 }
                                 Divider()
-                                Inspector(multiSelection: $multiSelection).frame(width: 300)
+                                Inspector(multiSelection: $multiSelection).frame(width: 320)
+                                if model.showRawJSON {
+                                    Divider()
+                                    RawJSONPanel()
+                                }
                             }
                             Divider()
                             StatusBar()
@@ -96,6 +63,7 @@ struct ContentView: View {
         .toolbar { toolbarContent }
         .sheet(isPresented: $model.savePickerPresented) { SaveToDeviceSheet() }
         .sheet(isPresented: $model.simulatorPresented) { SimulatorSheet() }
+        .sheet(isPresented: $model.midiLogPresented) { MidiLogSheet() }
         .preferredColorScheme(.dark)
     }
 
@@ -116,6 +84,32 @@ struct ContentView: View {
                 .disabled(!model.canUndo)
             Button { model.redo() } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
                 .disabled(!model.canRedo)
+
+            Divider()
+
+            Toggle(isOn: $model.showMiniGuide) {
+                Label("Mini guide", systemImage: "rectangle.dashed")
+            }
+            .toggleStyle(.button)
+            .help("Show Electra Mini layout guide (480×320)")
+
+            Toggle(isOn: Binding(
+                get: { model.showRawJSON },
+                set: { on in
+                    model.showRawJSON = on
+                    if on { model.refreshRawJSON() }
+                }
+            )) {
+                Label("JSON", systemImage: "curlybraces")
+            }
+            .toggleStyle(.button)
+            .disabled(model.document == nil)
+            .help("Raw JSON side panel")
+
+            Button { model.midiLogPresented = true } label: {
+                Label("MIDI log", systemImage: "wave.3.right")
+            }
+            .help("CTRL-port activity log")
 
             Divider()
 
@@ -389,6 +383,9 @@ private struct DeviceCanvas: View {
 
             if showGrid { SlotGridOverlay(scale: scale) }
             ControlSetBands(scale: scale)
+            if model.showMiniGuide {
+                MiniGuideOverlay(scale: scale)
+            }
 
             // Arrows sit under the controls so they never block control drags;
             // taps in the gaps between nodes still select them.
@@ -538,6 +535,28 @@ private struct DeviceCanvas: View {
             multiSelection = [id]
             model.selectedControlId = id
         }
+    }
+}
+
+/// Soft 480×320 guide for Electra Mini layout comfort (not a hard clip).
+private struct MiniGuideOverlay: View {
+    let scale: Double
+    var body: some View {
+        let w = SlotGeometry.miniGuideWidth * scale
+        let h = SlotGeometry.miniGuideHeight * scale
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 2)
+                .stroke(style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
+                .foregroundStyle(Color.cyan.opacity(0.55))
+                .frame(width: w, height: h)
+            Text("Mini \(Int(SlotGeometry.miniGuideWidth))×\(Int(SlotGeometry.miniGuideHeight))")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color.cyan.opacity(0.75))
+                .padding(4)
+                .offset(y: h + 2)
+        }
+        .frame(width: w, height: h + 16, alignment: .topLeading)
+        .allowsHitTesting(false)
     }
 }
 
@@ -1157,248 +1176,6 @@ private struct AlignmentToolbar: View {
     private func align(_ edge: AppModel.AlignEdge) { model.alignControls(Array(selectedIDs), to: edge) }
 }
 
-// MARK: - Inspector (full)
-
-private struct Inspector: View {
-    @EnvironmentObject var model: AppModel
-    @Binding var multiSelection: Set<Int>
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if multiSelection.count > 1 {
-                    multiInspector
-                } else if let k = model.selectedConnector {
-                    connectorInspector(k)
-                } else if let c = model.selectedControl {
-                    controlInspector(c)
-                } else {
-                    presetInspector
-                }
-            }
-            .padding(14)
-        }
-        .background(ElectraTheme.surface)
-    }
-
-    private var multiInspector: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("\(multiSelection.count) CONTROLS").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
-            Text("Use the alignment bar above the canvas, drag to move them together, or delete.")
-                .font(.caption).foregroundStyle(ElectraTheme.textSecondary).fixedSize(horizontal: false, vertical: true)
-            Button(role: .destructive) { model.deleteControls(Array(multiSelection)); multiSelection.removeAll() } label: {
-                Label("Delete \(multiSelection.count)", systemImage: "trash")
-            }
-        }
-    }
-
-    @ViewBuilder private var presetInspector: some View {
-        Text("PRESET").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
-        labeled("Name") {
-            TextField("Name", text: Binding(get: { model.document?.name ?? "" }, set: { model.setPresetName($0) }))
-                .textFieldStyle(.roundedBorder)
-        }
-        if let page = (model.document?.pages.first { $0.id == model.currentPageId }) {
-            labeled("Current page") {
-                TextField("Page name", text: Binding(get: { page.name }, set: { model.renamePage(page.id, $0) }))
-                    .textFieldStyle(.roundedBorder)
-            }
-        }
-        if let lua = model.luaInfo {
-            Label(lua, systemImage: "curlybraces.square").font(.caption).foregroundStyle(.purple)
-        }
-        Divider()
-        Text("\(model.currentControls.count) control(s) on this page").font(.caption).foregroundStyle(ElectraTheme.textSecondary)
-        Text("Select a control to edit it, ⌘-click to multi-select, drag to move. Add places a new one.")
-            .font(.caption).foregroundStyle(ElectraTheme.textTertiary).fixedSize(horizontal: false, vertical: true)
-    }
-
-    @ViewBuilder private func controlInspector(_ c: PresetDocument.Control) -> some View {
-        HStack {
-            Text("CONTROL").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
-            Spacer()
-            Button { model.duplicateControls([c.id]) } label: { Image(systemName: "plus.square.on.square") }.buttonStyle(.borderless)
-            Button(role: .destructive) { model.deleteSelectedControl() } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
-        }
-        labeled("Name") {
-            TextField("Name", text: Binding(get: { c.name }, set: { model.setControlName(c.id, $0) })).textFieldStyle(.roundedBorder)
-        }
-        labeled("Kind") {
-            Picker("", selection: Binding(get: { c.kind }, set: { model.setControlKind(c.id, $0) })) {
-                ForEach(PresetDocument.ControlKind.allCases, id: \.self) { Text($0.displayName).tag($0) }
-            }.labelsHidden()
-        }
-        labeled("Color") {
-            HStack(spacing: 6) {
-                ForEach(PresetDocument.palette, id: \.self) { hex in
-                    Circle().fill(Color(electraHex: hex)).frame(width: 20, height: 20)
-                        .overlay(Circle().stroke(Color.primary.opacity(c.colorHex.caseInsensitiveCompare(hex) == .orderedSame ? 0.9 : 0.15), lineWidth: 2))
-                        .onTapGesture { model.setControlColor(c.id, hex: hex) }
-                }
-            }
-        }
-        if c.isCustom {
-            Divider()
-            Text("PAINT SCRIPT").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
-            Text("Draws its own graphics via `\(PresetDocument.paintFunctionName(forControlId: c.id))(display)` in the preset's Lua. Edit it and the control repaints live.")
-                .font(.caption).foregroundStyle(ElectraTheme.textTertiary).fixedSize(horizontal: false, vertical: true)
-            Button { model.editPaintScript(id: c.id) } label: { Label("Edit Paint Script…", systemImage: "paintbrush.pointed") }
-                .buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
-        } else if c.isScript {
-            Divider()
-            Text("SCRIPT").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
-            Text("Runs `\(c.functionName ?? "")` in the preset's Lua. Tap ▶, double-click the control, or Run below.")
-                .font(.caption).foregroundStyle(ElectraTheme.textTertiary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button { model.runScriptControl(id: c.id) } label: { Label("Run", systemImage: "play.fill") }
-                    .buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
-                Button { model.editScriptControl(id: c.id) } label: { Label("Edit Script…", systemImage: "curlybraces") }
-            }
-            Menu {
-                Button("From Lua Editor")      { model.replaceScriptControl(id: c.id, from: .editor) }
-                Button("Paste from Clipboard") { model.replaceScriptControl(id: c.id, from: .clipboard) }
-                Button("Import File…")         { model.replaceScriptControl(id: c.id, from: .file) }
-            } label: {
-                Label("Replace…", systemImage: "arrow.triangle.2.circlepath")
-            }
-            .menuStyle(.borderlessButton)
-        } else {
-        Divider()
-        Text("MIDI").font(.subheadline.bold())
-        if c.kind == .adsr {
-            ForEach(model.document?.controlValues(id: c.id) ?? [], id: \.valueId) { v in
-                labeled("\(v.valueId.capitalized) CC") {
-                    TextField("", value: Binding(
-                        get: { v.parameterNumber ?? 0 },
-                        set: { model.setValueParameterNumber(c.id, valueId: v.valueId, $0) }), format: .number)
-                        .textFieldStyle(.roundedBorder)
-                }
-            }
-        } else {
-            labeled("Message") {
-                Picker("", selection: Binding(get: { c.messageType ?? "cc7" }, set: { model.setControlMessageType(c.id, $0) })) {
-                    ForEach(["cc7", "cc14", "nrpn", "rpn", "note", "program", "start", "stop"], id: \.self) { Text($0).tag($0) }
-                }.labelsHidden()
-            }
-            labeled("Parameter #") {
-                TextField("", value: Binding(get: { c.parameterNumber ?? 0 }, set: { model.setControlParameterNumber(c.id, $0) }), format: .number)
-                    .textFieldStyle(.roundedBorder)
-            }
-        }
-        }
-        Divider()
-        Text("POSITION").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
-        HStack {
-            numField("X", c.x) { model.setControlBounds(c.id, x: $0, y: c.y, w: c.w, h: c.h) }
-            numField("Y", c.y) { model.setControlBounds(c.id, x: c.x, y: $0, w: c.w, h: c.h) }
-        }
-        HStack {
-            numField("W", c.w) { model.setControlBounds(c.id, x: c.x, y: c.y, w: $0, h: c.h) }
-            numField("H", c.h) { model.setControlBounds(c.id, x: c.x, y: c.y, w: c.w, h: $0) }
-        }
-        Divider()
-        connectSection(c)
-    }
-
-    /// Board arrows for a control: draw new ones from the canvas handles, link
-    /// to a sub-page from here, and jump to any existing connector.
-    @ViewBuilder private func connectSection(_ c: PresetDocument.Control) -> some View {
-        Text("CONNECT").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
-        Text("Drag from a dot on the control's edge to arrow another control.")
-            .font(.caption).foregroundStyle(ElectraTheme.textTertiary).fixedSize(horizontal: false, vertical: true)
-        let otherPages = (model.document?.pages ?? []).filter { $0.id != model.currentPageId }
-        if !otherPages.isEmpty {
-            Menu {
-                ForEach(otherPages) { page in
-                    Button(page.name) { model.addConnector(from: c.id, to: .page(page.id)) }
-                }
-            } label: {
-                Label("Link to Page…", systemImage: "arrow.turn.up.right")
-            }
-            .menuStyle(.borderlessButton)
-        }
-        let related = model.currentConnectors.filter {
-            $0.fromControlId == c.id || $0.target == .control(c.id)
-        }
-        ForEach(related) { k in
-            Button {
-                model.selectedControlId = nil
-                model.selectedConnectorId = k.id
-            } label: {
-                Label(route(k), systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                    .font(.caption).lineLimit(1)
-            }
-            .buttonStyle(.borderless)
-        }
-    }
-
-    @ViewBuilder private func connectorInspector(_ k: PresetDocument.Connector) -> some View {
-        HStack {
-            Text("CONNECTOR").font(.caption.bold()).foregroundStyle(ElectraTheme.textSecondary)
-            Spacer()
-            Button(role: .destructive) { model.deleteConnector(k.id) } label: { Image(systemName: "trash") }
-                .buttonStyle(.borderless)
-        }
-        Label(route(k), systemImage: "arrow.right").font(.callout)
-        labeled("Label") {
-            TextField("Optional label", text: Binding(get: { k.label }, set: { model.setConnectorLabel(k.id, $0) }))
-                .textFieldStyle(.roundedBorder)
-        }
-        labeled("Color") {
-            HStack(spacing: 6) {
-                ForEach(PresetDocument.palette, id: \.self) { hex in
-                    Circle().fill(Color(electraHex: hex)).frame(width: 20, height: 20)
-                        .overlay(Circle().stroke(Color.primary.opacity(k.colorHex.caseInsensitiveCompare(hex) == .orderedSame ? 0.9 : 0.15), lineWidth: 2))
-                        .onTapGesture { model.setConnectorColor(k.id, hex: hex) }
-                }
-            }
-        }
-        switch k.target {
-        case .control:
-            Button { model.reverseConnector(k.id) } label: {
-                Label("Reverse Direction", systemImage: "arrow.left.arrow.right")
-            }
-        case .page(let pid):
-            Button { model.followConnector(k) } label: {
-                Label("Go to \(pageName(pid))", systemImage: "arrow.right.square")
-            }
-        }
-        Divider()
-        Text("Connectors are board annotations — they save with the file but are never uploaded to the device.")
-            .font(.caption).foregroundStyle(ElectraTheme.textTertiary).fixedSize(horizontal: false, vertical: true)
-    }
-
-    private func controlName(_ id: Int) -> String {
-        guard let c = model.document?.control(id: id) else { return "#\(id)" }
-        return c.name.isEmpty ? c.type.uppercased() : c.name
-    }
-
-    private func pageName(_ id: Int) -> String {
-        model.document?.pages.first { $0.id == id }?.name ?? "Page \(id)"
-    }
-
-    private func route(_ k: PresetDocument.Connector) -> String {
-        switch k.target {
-        case .control(let t): return "\(controlName(k.fromControlId)) → \(controlName(t))"
-        case .page(let p):    return "\(controlName(k.fromControlId)) → \(pageName(p))"
-        }
-    }
-
-    private func labeled<V: View>(_ title: String, @ViewBuilder _ content: () -> V) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.caption).foregroundStyle(ElectraTheme.textSecondary)
-            content()
-        }
-    }
-
-    private func numField(_ label: String, _ value: Double, _ set: @escaping (Double) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label).font(.caption).foregroundStyle(ElectraTheme.textTertiary)
-            TextField("", value: Binding(get: { Int(value) }, set: { set(Double($0)) }), format: .number).textFieldStyle(.roundedBorder)
-        }
-    }
-}
-
 // MARK: - Bottom bar (grid + zoom)
 
 private struct BottomBar: View {
@@ -1906,23 +1683,3 @@ private struct SimulatorSheet: View {
     }
 }
 
-private struct SaveToDeviceSheet: View {
-    @EnvironmentObject var model: AppModel
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Push to Device").font(.headline)
-            Text("Upload “\(model.documentTitle)” to a slot. This overwrites whatever is there.")
-                .font(.callout).foregroundStyle(ElectraTheme.textSecondary)
-            HStack(spacing: 20) {
-                Stepper("Bank \(model.saveBank)", value: $model.saveBank, in: 0...(model.bankCount - 1))
-                Stepper("Slot \(model.saveSlot)", value: $model.saveSlot, in: 0...(model.slotsPerBank - 1))
-            }
-            HStack {
-                Spacer()
-                Button("Cancel") { model.savePickerPresented = false }.keyboardShortcut(.cancelAction)
-                Button("Upload") { model.confirmSaveToDevice() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).tint(ElectraTheme.accent)
-            }
-        }
-        .padding(20).frame(width: 380)
-    }
-}

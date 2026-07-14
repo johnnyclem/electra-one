@@ -60,4 +60,15 @@ public enum SlotGeometry {
 
     /// Pot id (1…12) for a cell within its control set.
     public static func pot(col: Int, row: Int) -> Int { (row % 2) * columns + col + 1 }
+
+    // ── Mini guidance ────────────────────────────────────────────────────────
+    // Electra Mini has a smaller physical display; presets may still use full
+    // MK2 coordinates, but the editor draws a guide for the comfortable Mini
+    // working area (matches our looper presets: origin ~20,20 … ~500×280+soft).
+
+    /// Soft Mini layout guide (not a hard clip — device may accept larger).
+    public static let miniGuideWidth = 480.0
+    public static let miniGuideHeight = 320.0
+    public static let miniOriginX = 0.0
+    public static let miniOriginY = 0.0
 }

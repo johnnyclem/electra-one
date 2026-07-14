@@ -1,32 +1,33 @@
-import Testing
+import XCTest
+import Foundation
 @testable import LuaKit
 
-@Suite struct LuaEngineTests {
+final class LuaEngineTests: XCTestCase {
     let lua = LuaEngine()
 
-    @Test func checkPassesValidSource() {
-        #expect(lua.check("local x = 1 + 2") == nil)
+    func test_checkPassesValidSource() {
+        XCTAssertEqual(lua.check("local x = 1 + 2"), nil)
     }
 
-    @Test func checkReportsSyntaxError() {
+    func test_checkReportsSyntaxError() {
         let err = lua.check("print(")
-        #expect(err != nil)
-        #expect((err ?? "").contains("unexpected symbol") || (err ?? "").contains("eof"))
+        XCTAssertNotEqual(err, nil)
+        XCTAssert((err ?? "").contains("unexpected symbol") || (err ?? "").contains("eof"))
     }
 
-    @Test func runCapturesPrintOutput() {
+    func test_runCapturesPrintOutput() {
         let r = lua.run(#"print("hello", 1 + 2)"#)
-        #expect(r.ok)
-        #expect(r.output == "hello\t3\n")
+        XCTAssert(r.ok)
+        XCTAssertEqual(r.output, "hello\t3\n")
     }
 
-    @Test func infiniteLoopGuardStopsExecution() {
+    func test_infiniteLoopGuardStopsExecution() {
         let r = lua.run("while true do end")
-        #expect(!r.ok)
-        #expect((r.error ?? "").contains("instruction limit"))
+        XCTAssert(!r.ok)
+        XCTAssert((r.error ?? "").contains("instruction limit"))
     }
 
-    @Test func mockedElectraAPIDoesNotCrash() {
+    func test_mockedElectraAPIDoesNotCrash() {
         let r = lua.run(#"""
         local c = controls.get(13)
         c:setColor(RED)
@@ -35,29 +36,29 @@ import Testing
         midi.sendControlChange(PORT_1, 1, 74, 64)
         print("ok")
         """#)
-        #expect(r.ok)
-        #expect(r.output.contains("ok"))
+        XCTAssert(r.ok)
+        XCTAssert(r.output.contains("ok"))
     }
 
-    @Test func entryPointsAreInvoked() {
+    func test_entryPointsAreInvoked() {
         let r = lua.run(#"function onReady() print("ready!") end"#)
-        #expect(r.ok)
-        #expect(r.output.contains("ready!"))
+        XCTAssert(r.ok)
+        XCTAssert(r.output.contains("ready!"))
     }
 
-    @Test func simulatorCapturesBottomText() {
+    func test_simulatorCapturesBottomText() {
         let r = lua.simulate(#"""
         info.setText("patch 12")
         print("model:", controller.getModel())
         """#)
-        #expect(r.ok)
-        #expect(r.bottomText == "patch 12")
-        #expect(r.output.contains("mk2"))
+        XCTAssert(r.ok)
+        XCTAssertEqual(r.bottomText, "patch 12")
+        XCTAssert(r.output.contains("mk2"))
     }
 
-    @Test func simulatorReportsRuntimeError() {
+    func test_simulatorReportsRuntimeError() {
         let r = lua.simulate("error('boom')")
-        #expect(!r.ok)
-        #expect((r.error ?? "").contains("boom"))
+        XCTAssert(!r.ok)
+        XCTAssert((r.error ?? "").contains("boom"))
     }
 }

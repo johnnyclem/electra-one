@@ -1,36 +1,36 @@
 {
   "version": 2,
-  "name": "EHX 95000",
-  "projectId": "ehx-95000",
+  "name": "Valeton VLP-200",
+  "projectId": "valeton-vlp200",
   "pages": [
     {
       "id": 1,
-      "name": "Mixer"
+      "name": "Loops"
     },
     {
       "id": 2,
-      "name": "Transport"
+      "name": "Loop Pads"
     },
     {
       "id": 3,
-      "name": "Tracks"
+      "name": "Drums"
     },
     {
       "id": 4,
-      "name": "Loop"
+      "name": "Project"
     },
     {
       "id": 5,
-      "name": "Modes"
+      "name": "Transport"
     }
   ],
   "devices": [
     {
       "id": 1,
-      "name": "EHX 95000",
+      "name": "VLP-200",
       "port": 1,
       "channel": 1,
-      "rate": 15
+      "rate": 10
     }
   ],
   "overlays": [
@@ -39,403 +39,399 @@
       "items": [
         {
           "value": 0,
-          "label": "L00"
+          "label": "P01"
         },
         {
           "value": 1,
-          "label": "L01"
+          "label": "P02"
         },
         {
           "value": 2,
-          "label": "L02"
+          "label": "P03"
         },
         {
           "value": 3,
-          "label": "L03"
+          "label": "P04"
         },
         {
           "value": 4,
-          "label": "L04"
+          "label": "P05"
         },
         {
           "value": 5,
-          "label": "L05"
+          "label": "P06"
         },
         {
           "value": 6,
-          "label": "L06"
+          "label": "P07"
         },
         {
           "value": 7,
-          "label": "L07"
+          "label": "P08"
         },
         {
           "value": 8,
-          "label": "L08"
+          "label": "P09"
         },
         {
           "value": 9,
-          "label": "L09"
+          "label": "P10"
         },
         {
           "value": 10,
-          "label": "L10"
+          "label": "P11"
         },
         {
           "value": 11,
-          "label": "L11"
+          "label": "P12"
         },
         {
           "value": 12,
-          "label": "L12"
+          "label": "P13"
         },
         {
           "value": 13,
-          "label": "L13"
+          "label": "P14"
         },
         {
           "value": 14,
-          "label": "L14"
+          "label": "P15"
         },
         {
           "value": 15,
-          "label": "L15"
+          "label": "P16"
         },
         {
           "value": 16,
-          "label": "L16"
+          "label": "P17"
         },
         {
           "value": 17,
-          "label": "L17"
+          "label": "P18"
         },
         {
           "value": 18,
-          "label": "L18"
+          "label": "P19"
         },
         {
           "value": 19,
-          "label": "L19"
+          "label": "P20"
         },
         {
           "value": 20,
-          "label": "L20"
+          "label": "P21"
         },
         {
           "value": 21,
-          "label": "L21"
+          "label": "P22"
         },
         {
           "value": 22,
-          "label": "L22"
+          "label": "P23"
         },
         {
           "value": 23,
-          "label": "L23"
+          "label": "P24"
         },
         {
           "value": 24,
-          "label": "L24"
+          "label": "P25"
         },
         {
           "value": 25,
-          "label": "L25"
+          "label": "P26"
         },
         {
           "value": 26,
-          "label": "L26"
+          "label": "P27"
         },
         {
           "value": 27,
-          "label": "L27"
+          "label": "P28"
         },
         {
           "value": 28,
-          "label": "L28"
+          "label": "P29"
         },
         {
           "value": 29,
-          "label": "L29"
+          "label": "P30"
         },
         {
           "value": 30,
-          "label": "L30"
+          "label": "P31"
         },
         {
           "value": 31,
-          "label": "L31"
+          "label": "P32"
         },
         {
           "value": 32,
-          "label": "L32"
+          "label": "P33"
         },
         {
           "value": 33,
-          "label": "L33"
+          "label": "P34"
         },
         {
           "value": 34,
-          "label": "L34"
+          "label": "P35"
         },
         {
           "value": 35,
-          "label": "L35"
+          "label": "P36"
         },
         {
           "value": 36,
-          "label": "L36"
+          "label": "P37"
         },
         {
           "value": 37,
-          "label": "L37"
+          "label": "P38"
         },
         {
           "value": 38,
-          "label": "L38"
+          "label": "P39"
         },
         {
           "value": 39,
-          "label": "L39"
+          "label": "P40"
         },
         {
           "value": 40,
-          "label": "L40"
+          "label": "P41"
         },
         {
           "value": 41,
-          "label": "L41"
+          "label": "P42"
         },
         {
           "value": 42,
-          "label": "L42"
+          "label": "P43"
         },
         {
           "value": 43,
-          "label": "L43"
+          "label": "P44"
         },
         {
           "value": 44,
-          "label": "L44"
+          "label": "P45"
         },
         {
           "value": 45,
-          "label": "L45"
+          "label": "P46"
         },
         {
           "value": 46,
-          "label": "L46"
+          "label": "P47"
         },
         {
           "value": 47,
-          "label": "L47"
+          "label": "P48"
         },
         {
           "value": 48,
-          "label": "L48"
+          "label": "P49"
         },
         {
           "value": 49,
-          "label": "L49"
+          "label": "P50"
         },
         {
           "value": 50,
-          "label": "L50"
+          "label": "P51"
         },
         {
           "value": 51,
-          "label": "L51"
+          "label": "P52"
         },
         {
           "value": 52,
-          "label": "L52"
+          "label": "P53"
         },
         {
           "value": 53,
-          "label": "L53"
+          "label": "P54"
         },
         {
           "value": 54,
-          "label": "L54"
+          "label": "P55"
         },
         {
           "value": 55,
-          "label": "L55"
+          "label": "P56"
         },
         {
           "value": 56,
-          "label": "L56"
+          "label": "P57"
         },
         {
           "value": 57,
-          "label": "L57"
+          "label": "P58"
         },
         {
           "value": 58,
-          "label": "L58"
+          "label": "P59"
         },
         {
           "value": 59,
-          "label": "L59"
+          "label": "P60"
         },
         {
           "value": 60,
-          "label": "L60"
+          "label": "P61"
         },
         {
           "value": 61,
-          "label": "L61"
+          "label": "P62"
         },
         {
           "value": 62,
-          "label": "L62"
+          "label": "P63"
         },
         {
           "value": 63,
-          "label": "L63"
+          "label": "P64"
         },
         {
           "value": 64,
-          "label": "L64"
+          "label": "P65"
         },
         {
           "value": 65,
-          "label": "L65"
+          "label": "P66"
         },
         {
           "value": 66,
-          "label": "L66"
+          "label": "P67"
         },
         {
           "value": 67,
-          "label": "L67"
+          "label": "P68"
         },
         {
           "value": 68,
-          "label": "L68"
+          "label": "P69"
         },
         {
           "value": 69,
-          "label": "L69"
+          "label": "P70"
         },
         {
           "value": 70,
-          "label": "L70"
+          "label": "P71"
         },
         {
           "value": 71,
-          "label": "L71"
+          "label": "P72"
         },
         {
           "value": 72,
-          "label": "L72"
+          "label": "P73"
         },
         {
           "value": 73,
-          "label": "L73"
+          "label": "P74"
         },
         {
           "value": 74,
-          "label": "L74"
+          "label": "P75"
         },
         {
           "value": 75,
-          "label": "L75"
+          "label": "P76"
         },
         {
           "value": 76,
-          "label": "L76"
+          "label": "P77"
         },
         {
           "value": 77,
-          "label": "L77"
+          "label": "P78"
         },
         {
           "value": 78,
-          "label": "L78"
+          "label": "P79"
         },
         {
           "value": 79,
-          "label": "L79"
+          "label": "P80"
         },
         {
           "value": 80,
-          "label": "L80"
+          "label": "P81"
         },
         {
           "value": 81,
-          "label": "L81"
+          "label": "P82"
         },
         {
           "value": 82,
-          "label": "L82"
+          "label": "P83"
         },
         {
           "value": 83,
-          "label": "L83"
+          "label": "P84"
         },
         {
           "value": 84,
-          "label": "L84"
+          "label": "P85"
         },
         {
           "value": 85,
-          "label": "L85"
+          "label": "P86"
         },
         {
           "value": 86,
-          "label": "L86"
+          "label": "P87"
         },
         {
           "value": 87,
-          "label": "L87"
+          "label": "P88"
         },
         {
           "value": 88,
-          "label": "L88"
+          "label": "P89"
         },
         {
           "value": 89,
-          "label": "L89"
+          "label": "P90"
         },
         {
           "value": 90,
-          "label": "L90"
+          "label": "P91"
         },
         {
           "value": 91,
-          "label": "L91"
+          "label": "P92"
         },
         {
           "value": 92,
-          "label": "L92"
+          "label": "P93"
         },
         {
           "value": 93,
-          "label": "L93"
+          "label": "P94"
         },
         {
           "value": 94,
-          "label": "L94"
+          "label": "P95"
         },
         {
           "value": 95,
-          "label": "L95"
+          "label": "P96"
         },
         {
           "value": 96,
-          "label": "L96"
+          "label": "P97"
         },
         {
           "value": 97,
-          "label": "L97"
+          "label": "P98"
         },
         {
           "value": 98,
-          "label": "L98"
-        },
-        {
-          "value": 99,
-          "label": "L99"
+          "label": "P99"
         }
       ]
     }
@@ -446,8 +442,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PLAY/STOP",
-      "color": "22C55E",
+      "name": "L1 STACK",
+      "color": "94A3B8",
       "bounds": [
         20,
         230,
@@ -460,7 +456,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onPlayStop",
+          "function": "onL1Stack",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -481,8 +477,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "RECORD",
-      "color": "F97316",
+      "name": "ALL PLAY",
+      "color": "22C55E",
       "bounds": [
         178,
         230,
@@ -495,7 +491,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onRecord",
+          "function": "onAllPlay",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -516,8 +512,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "UNDO",
-      "color": "A78BFA",
+      "name": "ALL STOP",
+      "color": "EF4444",
       "bounds": [
         336,
         230,
@@ -530,7 +526,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onUndo",
+          "function": "onAllStop",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -565,7 +561,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onTap",
+          "function": "onTapTempo",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -586,8 +582,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PLAY/STOP",
-      "color": "22C55E",
+      "name": "L1 STACK",
+      "color": "94A3B8",
       "bounds": [
         20,
         230,
@@ -600,7 +596,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onPlayStop",
+          "function": "onL1Stack",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -621,8 +617,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "RECORD",
-      "color": "F97316",
+      "name": "ALL PLAY",
+      "color": "22C55E",
       "bounds": [
         178,
         230,
@@ -635,7 +631,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onRecord",
+          "function": "onAllPlay",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -656,8 +652,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "UNDO",
-      "color": "A78BFA",
+      "name": "ALL STOP",
+      "color": "EF4444",
       "bounds": [
         336,
         230,
@@ -670,7 +666,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onUndo",
+          "function": "onAllStop",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -705,7 +701,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onTap",
+          "function": "onTapTempo",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -726,8 +722,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PLAY/STOP",
-      "color": "22C55E",
+      "name": "L1 STACK",
+      "color": "94A3B8",
       "bounds": [
         20,
         230,
@@ -740,7 +736,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onPlayStop",
+          "function": "onL1Stack",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -761,8 +757,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "RECORD",
-      "color": "F97316",
+      "name": "ALL PLAY",
+      "color": "22C55E",
       "bounds": [
         178,
         230,
@@ -775,7 +771,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onRecord",
+          "function": "onAllPlay",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -796,8 +792,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "UNDO",
-      "color": "A78BFA",
+      "name": "ALL STOP",
+      "color": "EF4444",
       "bounds": [
         336,
         230,
@@ -810,7 +806,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onUndo",
+          "function": "onAllStop",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -845,7 +841,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onTap",
+          "function": "onTapTempo",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -866,8 +862,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PLAY/STOP",
-      "color": "22C55E",
+      "name": "L1 STACK",
+      "color": "94A3B8",
       "bounds": [
         20,
         230,
@@ -880,7 +876,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onPlayStop",
+          "function": "onL1Stack",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -901,8 +897,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "RECORD",
-      "color": "F97316",
+      "name": "ALL PLAY",
+      "color": "22C55E",
       "bounds": [
         178,
         230,
@@ -915,7 +911,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onRecord",
+          "function": "onAllPlay",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -936,8 +932,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "UNDO",
-      "color": "A78BFA",
+      "name": "ALL STOP",
+      "color": "EF4444",
       "bounds": [
         336,
         230,
@@ -950,7 +946,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onUndo",
+          "function": "onAllStop",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -985,7 +981,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onTap",
+          "function": "onTapTempo",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -1006,8 +1002,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PLAY/STOP",
-      "color": "22C55E",
+      "name": "L1 STACK",
+      "color": "94A3B8",
       "bounds": [
         20,
         230,
@@ -1020,7 +1016,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onPlayStop",
+          "function": "onL1Stack",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -1041,8 +1037,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "RECORD",
-      "color": "F97316",
+      "name": "ALL PLAY",
+      "color": "22C55E",
       "bounds": [
         178,
         230,
@@ -1055,7 +1051,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onRecord",
+          "function": "onAllPlay",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -1076,8 +1072,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "UNDO",
-      "color": "A78BFA",
+      "name": "ALL STOP",
+      "color": "EF4444",
       "bounds": [
         336,
         230,
@@ -1090,7 +1086,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onUndo",
+          "function": "onAllStop",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -1125,7 +1121,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onTap",
+          "function": "onTapTempo",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -1146,8 +1142,8 @@
       "type": "fader",
       "visible": true,
       "variant": "thin",
-      "name": "TRK 1",
-      "color": "3B82F6",
+      "name": "LOOP 1",
+      "color": "22C55E",
       "bounds": [
         20,
         20,
@@ -1165,7 +1161,7 @@
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 20,
+            "parameterNumber": 2,
             "min": 0,
             "max": 127
           }
@@ -1183,7 +1179,7 @@
       "type": "fader",
       "visible": true,
       "variant": "thin",
-      "name": "TRK 2",
+      "name": "LOOP 2",
       "color": "3B82F6",
       "bounds": [
         216,
@@ -1202,7 +1198,7 @@
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 21,
+            "parameterNumber": 3,
             "min": 0,
             "max": 127
           }
@@ -1220,8 +1216,8 @@
       "type": "fader",
       "visible": true,
       "variant": "thin",
-      "name": "TRK 3",
-      "color": "3B82F6",
+      "name": "DRUM",
+      "color": "F59E0B",
       "bounds": [
         412,
         20,
@@ -1235,11 +1231,11 @@
           "id": "value",
           "min": 0,
           "max": 127,
-          "defaultValue": 100,
+          "defaultValue": 90,
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 22,
+            "parameterNumber": 4,
             "min": 0,
             "max": 127
           }
@@ -1253,32 +1249,30 @@
       ]
     },
     {
-      "id": 4,
-      "type": "fader",
+      "id": 10,
+      "type": "pad",
+      "mode": "momentary",
       "visible": true,
-      "variant": "thin",
-      "name": "TRK 4",
-      "color": "3B82F6",
+      "name": "STOP ALL",
+      "color": "EF4444",
       "bounds": [
         608,
         20,
         175,
-        80
+        72
       ],
       "pageId": 1,
       "controlSetId": 1,
       "values": [
         {
           "id": "value",
-          "min": 0,
-          "max": 127,
-          "defaultValue": 100,
+          "defaultValue": "off",
+          "function": "onPlayStopAll",
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 23,
-            "min": 0,
-            "max": 127
+            "parameterNumber": 60,
+            "onValue": 127
           }
         }
       ],
@@ -1290,32 +1284,30 @@
       ]
     },
     {
-      "id": 5,
-      "type": "fader",
+      "id": 11,
+      "type": "pad",
+      "mode": "momentary",
       "visible": true,
-      "variant": "thin",
-      "name": "TRK 5",
-      "color": "3B82F6",
+      "name": "DRUM TOG",
+      "color": "F59E0B",
       "bounds": [
         20,
         120,
         175,
-        80
+        72
       ],
       "pageId": 1,
       "controlSetId": 1,
       "values": [
         {
           "id": "value",
-          "min": 0,
-          "max": 127,
-          "defaultValue": 100,
+          "defaultValue": "off",
+          "function": "onDrumToggle",
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 24,
-            "min": 0,
-            "max": 127
+            "parameterNumber": 61,
+            "onValue": 127
           }
         }
       ],
@@ -1327,32 +1319,30 @@
       ]
     },
     {
-      "id": 6,
-      "type": "fader",
+      "id": 12,
+      "type": "pad",
+      "mode": "momentary",
       "visible": true,
-      "variant": "thin",
-      "name": "TRK 6",
-      "color": "3B82F6",
+      "name": "TAP TMP",
+      "color": "94A3B8",
       "bounds": [
         216,
         120,
         175,
-        80
+        72
       ],
       "pageId": 1,
       "controlSetId": 1,
       "values": [
         {
           "id": "value",
-          "min": 0,
-          "max": 127,
-          "defaultValue": 100,
+          "defaultValue": "off",
+          "function": "onTapTempo",
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 25,
-            "min": 0,
-            "max": 127
+            "parameterNumber": 62,
+            "onValue": 127
           }
         }
       ],
@@ -1368,8 +1358,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PLAY/STOP",
-      "color": "22C55E",
+      "name": "L1 REC",
+      "color": "F97316",
       "bounds": [
         20,
         20,
@@ -1382,11 +1372,11 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onPlayStop",
+          "function": "onL1Rec",
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 60,
+            "parameterNumber": 63,
             "onValue": 127
           }
         }
@@ -1403,8 +1393,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "RECORD",
-      "color": "F97316",
+      "name": "L1 PLAY",
+      "color": "22C55E",
       "bounds": [
         216,
         20,
@@ -1417,11 +1407,11 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onRecord",
+          "function": "onL1Play",
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 61,
+            "parameterNumber": 64,
             "onValue": 127
           }
         }
@@ -1438,8 +1428,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "UNDO",
-      "color": "A78BFA",
+      "name": "L1 UNDO",
+      "color": "94A3B8",
       "bounds": [
         412,
         20,
@@ -1452,11 +1442,11 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onUndo",
+          "function": "onL1Undo",
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 62,
+            "parameterNumber": 65,
             "onValue": 127
           }
         }
@@ -1473,8 +1463,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "TRACK FSW",
-      "color": "3B82F6",
+      "name": "L2 REC",
+      "color": "F97316",
       "bounds": [
         608,
         20,
@@ -1487,11 +1477,11 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onTrackFsw",
+          "function": "onL2Rec",
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 63,
+            "parameterNumber": 66,
             "onValue": 127
           }
         }
@@ -1508,8 +1498,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "LOOP DN",
-      "color": "06B6D4",
+      "name": "L2 PLAY",
+      "color": "3B82F6",
       "bounds": [
         20,
         120,
@@ -1522,11 +1512,11 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onLoopDown",
+          "function": "onL2Play",
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 64,
+            "parameterNumber": 67,
             "onValue": 127
           }
         }
@@ -1543,8 +1533,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "LOOP UP",
-      "color": "06B6D4",
+      "name": "L2 UNDO",
+      "color": "94A3B8",
       "bounds": [
         216,
         120,
@@ -1557,11 +1547,11 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onLoopUp",
+          "function": "onL2Undo",
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 65,
+            "parameterNumber": 68,
             "onValue": 127
           }
         }
@@ -1574,30 +1564,102 @@
       ]
     },
     {
-      "id": 30,
+      "id": 26,
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "TRK 1",
+      "name": "L1 ONCE",
+      "color": "22C55E",
+      "bounds": [
+        412,
+        120,
+        175,
+        72
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "values": [
+        {
+          "id": "value",
+          "defaultValue": "off",
+          "function": "onL1Once",
+          "message": {
+            "deviceId": 1,
+            "type": "cc7",
+            "parameterNumber": 69,
+            "onValue": 127
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "potId": 7,
+          "valueId": "value"
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "pad",
+      "mode": "momentary",
+      "visible": true,
+      "name": "L2 ONCE",
       "color": "3B82F6",
+      "bounds": [
+        608,
+        120,
+        175,
+        72
+      ],
+      "pageId": 2,
+      "controlSetId": 1,
+      "values": [
+        {
+          "id": "value",
+          "defaultValue": "off",
+          "function": "onL2Once",
+          "message": {
+            "deviceId": 1,
+            "type": "cc7",
+            "parameterNumber": 70,
+            "onValue": 127
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "potId": 8,
+          "valueId": "value"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "fader",
+      "visible": true,
+      "variant": "thin",
+      "name": "DRUM VOL",
+      "color": "F59E0B",
       "bounds": [
         20,
         20,
         175,
-        72
+        80
       ],
       "pageId": 3,
       "controlSetId": 1,
       "values": [
         {
           "id": "value",
-          "defaultValue": "off",
-          "function": "onTrack1",
+          "min": 0,
+          "max": 127,
+          "defaultValue": 90,
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 66,
-            "onValue": 127
+            "parameterNumber": 4,
+            "min": 0,
+            "max": 127
           }
         }
       ],
@@ -1613,8 +1675,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "TRK 2",
-      "color": "3B82F6",
+      "name": "DRUM TOG",
+      "color": "F59E0B",
       "bounds": [
         216,
         20,
@@ -1627,11 +1689,11 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onTrack2",
+          "function": "onDrumToggle",
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 67,
+            "parameterNumber": 71,
             "onValue": 127
           }
         }
@@ -1648,8 +1710,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "TRK 3",
-      "color": "3B82F6",
+      "name": "TAP TMP",
+      "color": "94A3B8",
       "bounds": [
         412,
         20,
@@ -1662,11 +1724,11 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onTrack3",
+          "function": "onTapTempo",
           "message": {
             "deviceId": 1,
             "type": "cc7",
-            "parameterNumber": 68,
+            "parameterNumber": 72,
             "onValue": 127
           }
         }
@@ -1683,8 +1745,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "TRK 4",
-      "color": "3B82F6",
+      "name": "STOP ALL",
+      "color": "EF4444",
       "bounds": [
         608,
         20,
@@ -1697,225 +1759,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onTrack4",
-          "message": {
-            "deviceId": 1,
-            "type": "cc7",
-            "parameterNumber": 69,
-            "onValue": 127
-          }
-        }
-      ],
-      "inputs": [
-        {
-          "potId": 4,
-          "valueId": "value"
-        }
-      ]
-    },
-    {
-      "id": 34,
-      "type": "pad",
-      "mode": "momentary",
-      "visible": true,
-      "name": "TRK 5",
-      "color": "3B82F6",
-      "bounds": [
-        20,
-        120,
-        175,
-        72
-      ],
-      "pageId": 3,
-      "controlSetId": 1,
-      "values": [
-        {
-          "id": "value",
-          "defaultValue": "off",
-          "function": "onTrack5",
-          "message": {
-            "deviceId": 1,
-            "type": "cc7",
-            "parameterNumber": 70,
-            "onValue": 127
-          }
-        }
-      ],
-      "inputs": [
-        {
-          "potId": 5,
-          "valueId": "value"
-        }
-      ]
-    },
-    {
-      "id": 35,
-      "type": "pad",
-      "mode": "momentary",
-      "visible": true,
-      "name": "TRK 6",
-      "color": "3B82F6",
-      "bounds": [
-        216,
-        120,
-        175,
-        72
-      ],
-      "pageId": 3,
-      "controlSetId": 1,
-      "values": [
-        {
-          "id": "value",
-          "defaultValue": "off",
-          "function": "onTrack6",
-          "message": {
-            "deviceId": 1,
-            "type": "cc7",
-            "parameterNumber": 71,
-            "onValue": 127
-          }
-        }
-      ],
-      "inputs": [
-        {
-          "potId": 6,
-          "valueId": "value"
-        }
-      ]
-    },
-    {
-      "id": 40,
-      "type": "list",
-      "visible": true,
-      "variant": "valueOnly",
-      "name": "LOOP",
-      "color": "06B6D4",
-      "bounds": [
-        20,
-        20,
-        371,
-        76
-      ],
-      "pageId": 4,
-      "controlSetId": 1,
-      "values": [
-        {
-          "id": "value",
-          "min": 0,
-          "max": 99,
-          "defaultValue": 0,
-          "overlayId": 1,
-          "function": "onLoopSelect",
-          "message": {
-            "deviceId": 1,
-            "type": "cc7",
-            "parameterNumber": 72,
-            "min": 0,
-            "max": 99
-          }
-        }
-      ],
-      "inputs": [
-        {
-          "potId": 1,
-          "valueId": "value"
-        }
-      ]
-    },
-    {
-      "id": 41,
-      "type": "fader",
-      "visible": true,
-      "variant": "thin",
-      "name": "MIX VOL",
-      "color": "F59E0B",
-      "bounds": [
-        412,
-        20,
-        175,
-        80
-      ],
-      "pageId": 4,
-      "controlSetId": 1,
-      "values": [
-        {
-          "id": "value",
-          "min": 0,
-          "max": 127,
-          "defaultValue": 100,
-          "message": {
-            "deviceId": 1,
-            "type": "cc7",
-            "parameterNumber": 26,
-            "min": 0,
-            "max": 127
-          }
-        }
-      ],
-      "inputs": [
-        {
-          "potId": 2,
-          "valueId": "value"
-        }
-      ]
-    },
-    {
-      "id": 42,
-      "type": "fader",
-      "visible": true,
-      "variant": "thin",
-      "name": "MASTER",
-      "color": "FFFFFF",
-      "bounds": [
-        608,
-        20,
-        175,
-        80
-      ],
-      "pageId": 4,
-      "controlSetId": 1,
-      "values": [
-        {
-          "id": "value",
-          "min": 0,
-          "max": 127,
-          "defaultValue": 100,
-          "message": {
-            "deviceId": 1,
-            "type": "cc7",
-            "parameterNumber": 7,
-            "min": 0,
-            "max": 127
-          }
-        }
-      ],
-      "inputs": [
-        {
-          "potId": 3,
-          "valueId": "value"
-        }
-      ]
-    },
-    {
-      "id": 43,
-      "type": "pad",
-      "mode": "momentary",
-      "visible": true,
-      "name": "NEW LOOP",
-      "color": "F97316",
-      "bounds": [
-        20,
-        120,
-        175,
-        72
-      ],
-      "pageId": 4,
-      "controlSetId": 1,
-      "values": [
-        {
-          "id": "value",
-          "defaultValue": "off",
-          "function": "onNewLoop",
+          "function": "onPlayStopAll",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -1932,12 +1776,86 @@
       ]
     },
     {
-      "id": 44,
+      "id": 40,
+      "type": "list",
+      "visible": true,
+      "variant": "valueOnly",
+      "name": "Project",
+      "color": "A78BFA",
+      "bounds": [
+        20,
+        20,
+        413,
+        76
+      ],
+      "pageId": 4,
+      "controlSetId": 1,
+      "values": [
+        {
+          "id": "value",
+          "min": 0,
+          "max": 98,
+          "defaultValue": 0,
+          "overlayId": 1,
+          "function": "onProjectSelect",
+          "message": {
+            "deviceId": 1,
+            "type": "program",
+            "parameterNumber": 0,
+            "min": 0,
+            "max": 98
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "potId": 1,
+          "valueId": "value"
+        }
+      ]
+    },
+    {
+      "id": 41,
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "MIXDOWN",
-      "color": "F59E0B",
+      "name": "PROJ UP",
+      "color": "A78BFA",
+      "bounds": [
+        20,
+        120,
+        175,
+        72
+      ],
+      "pageId": 4,
+      "controlSetId": 1,
+      "values": [
+        {
+          "id": "value",
+          "defaultValue": "off",
+          "function": "onProjectUp",
+          "message": {
+            "deviceId": 1,
+            "type": "cc7",
+            "parameterNumber": 74,
+            "onValue": 127
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "potId": 2,
+          "valueId": "value"
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "type": "pad",
+      "mode": "momentary",
+      "visible": true,
+      "name": "PROJ DN",
+      "color": "A78BFA",
       "bounds": [
         216,
         120,
@@ -1950,42 +1868,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onMixdownBtn",
-          "message": {
-            "deviceId": 1,
-            "type": "cc7",
-            "parameterNumber": 74,
-            "onValue": 127
-          }
-        }
-      ],
-      "inputs": [
-        {
-          "potId": 5,
-          "valueId": "value"
-        }
-      ]
-    },
-    {
-      "id": 45,
-      "type": "pad",
-      "mode": "momentary",
-      "visible": true,
-      "name": "REVERSE",
-      "color": "EC4899",
-      "bounds": [
-        412,
-        120,
-        175,
-        72
-      ],
-      "pageId": 4,
-      "controlSetId": 1,
-      "values": [
-        {
-          "id": "value",
-          "defaultValue": "off",
-          "function": "onReverse",
+          "function": "onProjectDown",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -1996,7 +1879,7 @@
       ],
       "inputs": [
         {
-          "potId": 6,
+          "potId": 3,
           "valueId": "value"
         }
       ]
@@ -2006,8 +1889,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "OCT",
-      "color": "EC4899",
+      "name": "STOP ALL",
+      "color": "EF4444",
       "bounds": [
         20,
         20,
@@ -2020,7 +1903,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onOct",
+          "function": "onPlayStopAll",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -2041,8 +1924,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PUNCH",
-      "color": "F97316",
+      "name": "L1 PLAY",
+      "color": "22C55E",
       "bounds": [
         216,
         20,
@@ -2055,7 +1938,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onPunch",
+          "function": "onL1Play",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -2076,8 +1959,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "QUANTIZE",
-      "color": "06B6D4",
+      "name": "L2 PLAY",
+      "color": "3B82F6",
       "bounds": [
         412,
         20,
@@ -2090,7 +1973,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onQuantize",
+          "function": "onL2Play",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -2111,8 +1994,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "EXT CLOCK",
-      "color": "94A3B8",
+      "name": "DRUM TOG",
+      "color": "F59E0B",
       "bounds": [
         608,
         20,
@@ -2125,7 +2008,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onExtClock",
+          "function": "onDrumToggle",
           "message": {
             "deviceId": 1,
             "type": "cc7",
@@ -2143,33 +2026,30 @@
     },
     {
       "id": 54,
-      "type": "fader",
+      "type": "pad",
+      "mode": "momentary",
       "visible": true,
-      "variant": "thin",
-      "name": "TEMPO",
-      "color": "F59E0B",
+      "name": "L1 REC",
+      "color": "F97316",
       "bounds": [
         20,
         120,
         175,
-        80
+        72
       ],
       "pageId": 5,
       "controlSetId": 1,
       "values": [
         {
           "id": "value",
-          "min": 40,
-          "max": 240,
-          "defaultValue": 120,
+          "defaultValue": "off",
+          "function": "onL1Rec",
           "message": {
             "deviceId": 1,
-            "type": "virtual",
+            "type": "cc7",
             "parameterNumber": 80,
-            "min": 40,
-            "max": 240
-          },
-          "function": "onTempo"
+            "onValue": 127
+          }
         }
       ],
       "inputs": [
@@ -2184,8 +2064,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "Start MIDI \ud83d\udd50",
-      "color": "22C55E",
+      "name": "L2 REC",
+      "color": "F97316",
       "bounds": [
         216,
         120,
@@ -2198,7 +2078,7 @@
         {
           "id": "value",
           "defaultValue": "off",
-          "function": "onClockRun",
+          "function": "onL2Rec",
           "message": {
             "deviceId": 1,
             "type": "cc7",
