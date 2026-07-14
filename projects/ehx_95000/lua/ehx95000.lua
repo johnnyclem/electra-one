@@ -24,6 +24,10 @@
 --   XT  LED solid   = full external slave (Clock + Start/Stop/SPP)
 --   BX  LED blinks  = beat-sync slave (Clock only; ignores Start)
 --
+-- Transport (optimistic):
+--   Play pad labels next action: Play / Pause / Stop (95000 has no true
+--   pause — Pause = idle). Record pad amber when idle, red while recording.
+--
 -- MIDI clock master (Modes page):
 --   TEMPO fader (virtual 40–240 BPM) + Start/Stop MIDI Clock pad.
 --   Electra emits 24 PPQN Clock + Start/Stop for XT/BX slave modes.
@@ -58,17 +62,20 @@ local LABEL_STOP  = "Stop MIDI Clock"
 
 -- UI colors (24-bit RGB for Control:setColor)
 local COL = {
-    dim   = 0x94A3B8,
-    rec   = 0xF97316,
-    play  = 0x22C55E,
-    mix   = 0xF59E0B,
-    fx    = 0xEC4899,
-    loop  = 0x06B6D4,
-    amber = 0xFBBF24,
-    green = 0x22C55E,
-    pink  = 0xF472B6,
-    cyan  = 0x22D3EE,
-    orange= 0xFB923C,
+    dim    = 0x94A3B8,
+    rec    = 0xF97316, -- punch / accents
+    recRed = 0xEF4444, -- Record while capturing / overdubbing
+    play   = 0x22C55E,
+    mix    = 0xF59E0B,
+    fx     = 0xEC4899,
+    loop   = 0x06B6D4,
+    amber  = 0xFBBF24, -- Record idle / armed
+    green  = 0x22C55E,
+    pink   = 0xF472B6,
+    cyan   = 0x22D3EE,
+    orange = 0xFB923C,
+    pause  = 0x4ADE80, -- Pause label while playing
+    stop   = 0xF87171, -- Stop label while recording (PLAY exits to idle)
 }
 
 -- Control ids from generate.py
@@ -81,6 +88,21 @@ local ID = {
     extClock = 53,
     clockRun = 55,
 }
+
+-- Play / Record pads: Transport page + soft keys on every page
+local PLAY_IDS = { 20, 100, 200, 300, 400, 500 }
+local REC_IDS  = { 21, 101, 201, 301, 401, 501 }
+
+-- Optimistic transport (manual p.11–12). 95000 has no true Pause — idle is
+-- stop/pause. Labels show the *next action* on the Play pad:
+--   stopped/armed → "Play"
+--   playing       → "Pause"
+--   recording     → "Stop"   (PLAY from overdub/record → idle)
+local TP_STOPPED   = "stopped"
+local TP_PLAYING   = "playing"
+local TP_RECORDING = "recording"
+local TP_ARMED     = "armed"     -- NEW LOOP record-ready (REC LED blinks)
+local transport    = TP_STOPPED
 
 local ctrlCache = {}
 
@@ -325,6 +347,33 @@ local function applyMixdownUi()
     end
 end
 
+local function paintAll(ids, name, color)
+    for i = 1, #ids do
+        paintPad(ids[i], name, color)
+    end
+end
+
+-- Play pad = next action; Record pad = amber idle / red while armed or rec.
+local function applyTransportUi()
+    if transport == TP_PLAYING then
+        paintAll(PLAY_IDS, "Pause", COL.pause)
+    elseif transport == TP_RECORDING then
+        paintAll(PLAY_IDS, "Stop", COL.stop)
+    else
+        -- stopped or armed
+        paintAll(PLAY_IDS, "Play", COL.play)
+    end
+
+    if transport == TP_RECORDING then
+        paintAll(REC_IDS, "Record", COL.recRed)
+    elseif transport == TP_ARMED then
+        -- Record-ready: still not capturing — amber, distinct from solid red
+        paintAll(REC_IDS, "Record", COL.orange)
+    else
+        paintAll(REC_IDS, "Record", COL.amber)
+    end
+end
+
 local function applyAllToggleUi()
     applyBinaryUi("reverse")
     applyBinaryUi("oct")
@@ -332,7 +381,50 @@ local function applyAllToggleUi()
     applyBinaryUi("quantize")
     applyExtClockUi()
     applyMixdownUi()
+    applyTransportUi()
     setClockPadLabel(clockRunning)
+end
+
+-- Advance optimistic transport from PC 102/103/106 (no MIDI send).
+local function advanceTransportFromPc(pc)
+    if pc == 103 then
+        -- PLAY footswitch
+        if transport == TP_PLAYING or transport == TP_RECORDING then
+            transport = TP_STOPPED
+            info.setText("Stop")
+        else
+            -- stopped or armed → playback
+            transport = TP_PLAYING
+            info.setText("Play")
+        end
+        applyTransportUi()
+        return true
+    elseif pc == 102 then
+        -- RECORD footswitch
+        if transport == TP_RECORDING then
+            -- Exit overdub → playback (manual)
+            transport = TP_PLAYING
+            info.setText("Play")
+        else
+            -- idle / play / armed → record or overdub
+            transport = TP_RECORDING
+            info.setText("Record")
+        end
+        applyTransportUi()
+        return true
+    elseif pc == 106 then
+        -- NEW LOOP: enter/exit record-ready
+        if transport == TP_ARMED then
+            transport = TP_STOPPED
+            info.setText("Arm off")
+        else
+            transport = TP_ARMED
+            info.setText("Armed")
+        end
+        applyTransportUi()
+        return true
+    end
+    return false
 end
 
 local function extLabel()
@@ -391,15 +483,20 @@ local function pressToggle(pc)
 end
 
 -- ---------------------------------------------------------------------------
--- Transport / footswitches (PC) — momentary, no latch
+-- Transport / footswitches (PC)
+-- Play pad cycles labels Play → Pause → Stop; Record is amber/red.
 -- ---------------------------------------------------------------------------
 
 function onPlayStop(valueObject, value)
-    if pressed(value) then pulsePC(103, "PLAY/STOP") end
+    if not pressed(value) then return end
+    if not pulsePC(103) then return end
+    advanceTransportFromPc(103)
 end
 
 function onRecord(valueObject, value)
-    if pressed(value) then pulsePC(102, "RECORD") end
+    if not pressed(value) then return end
+    if not pulsePC(102) then return end
+    advanceTransportFromPc(102)
 end
 
 function onUndo(valueObject, value)
@@ -419,7 +516,9 @@ function onLoopUp(valueObject, value)
 end
 
 function onNewLoop(valueObject, value)
-    if pressed(value) then pulsePC(106, "NEW LOOP") end
+    if not pressed(value) then return end
+    if not pulsePC(106) then return end
+    advanceTransportFromPc(106)
 end
 
 function onReverse(valueObject, value)
@@ -546,11 +645,16 @@ local function channelMatches(channel)
     return false
 end
 
+local function advanceFromIncomingPc(pc)
+    if advanceTransportFromPc(pc) then return end
+    advanceToggleFromPc(pc)
+end
+
 function midi.onProgramChange(midiInput, channel, program)
     if not channelMatches(channel) then return end
     if type(program) ~= "number" then return end
     if isOurEcho(program) then return end
-    advanceToggleFromPc(program)
+    advanceFromIncomingPc(program)
 end
 
 function midi.onControlChange(midiInput, channel, controllerNumber, value)
@@ -558,7 +662,7 @@ function midi.onControlChange(midiInput, channel, controllerNumber, value)
     -- CC3 button-press path (same data values as PC 100–127)
     if controllerNumber == 3 and type(value) == "number" and value >= 100 then
         if isOurEcho(value) then return end
-        advanceToggleFromPc(value)
+        advanceFromIncomingPc(value)
     end
 end
 
@@ -581,10 +685,10 @@ function ufTap()
 end
 
 preset.userFunctions = {
-    pot1 = { call = ufPlay,   name = "PLAY/STOP", close = false },
-    pot2 = { call = ufRecord, name = "RECORD",    close = false },
-    pot3 = { call = ufUndo,   name = "UNDO",      close = false },
-    pot4 = { call = ufTap,    name = "TAP",       close = false },
+    pot1 = { call = ufPlay,   name = "Play",   close = false },
+    pot2 = { call = ufRecord, name = "Record", close = false },
+    pot3 = { call = ufUndo,   name = "UNDO",   close = false },
+    pot4 = { call = ufTap,    name = "TAP",    close = false },
 }
 
 function preset.onLoad()
@@ -592,14 +696,15 @@ function preset.onLoad()
     applyBpm(bpm)
     clockRunning = false
     pcall(function() timer.disable() end)
-    -- Assume power-up defaults (all toggles off / EXT IN). User can resync
-    -- by cycling once if the hardware was left in another state.
+    -- Assume power-up defaults (all toggles off / EXT IN / stopped).
+    -- User can resync by cycling if the hardware was left mid-state.
     bin.reverse = false
     bin.oct = false
     bin.punch = false
     bin.quantize = false
     extMode = 0
     mixMode = 0
+    transport = TP_STOPPED
     applyAllToggleUi()
 end
 

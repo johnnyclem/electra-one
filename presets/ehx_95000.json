@@ -446,7 +446,7 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PLAY/STOP",
+      "name": "Play",
       "color": "22C55E",
       "bounds": [
         20,
@@ -481,8 +481,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "RECORD",
-      "color": "F97316",
+      "name": "Record",
+      "color": "FBBF24",
       "bounds": [
         178,
         230,
@@ -586,7 +586,7 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PLAY/STOP",
+      "name": "Play",
       "color": "22C55E",
       "bounds": [
         20,
@@ -621,8 +621,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "RECORD",
-      "color": "F97316",
+      "name": "Record",
+      "color": "FBBF24",
       "bounds": [
         178,
         230,
@@ -726,7 +726,7 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PLAY/STOP",
+      "name": "Play",
       "color": "22C55E",
       "bounds": [
         20,
@@ -761,8 +761,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "RECORD",
-      "color": "F97316",
+      "name": "Record",
+      "color": "FBBF24",
       "bounds": [
         178,
         230,
@@ -866,7 +866,7 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PLAY/STOP",
+      "name": "Play",
       "color": "22C55E",
       "bounds": [
         20,
@@ -901,8 +901,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "RECORD",
-      "color": "F97316",
+      "name": "Record",
+      "color": "FBBF24",
       "bounds": [
         178,
         230,
@@ -1006,7 +1006,7 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PLAY/STOP",
+      "name": "Play",
       "color": "22C55E",
       "bounds": [
         20,
@@ -1041,8 +1041,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "RECORD",
-      "color": "F97316",
+      "name": "Record",
+      "color": "FBBF24",
       "bounds": [
         178,
         230,
@@ -1368,7 +1368,7 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "PLAY/STOP",
+      "name": "Play",
       "color": "22C55E",
       "bounds": [
         20,
@@ -1403,8 +1403,8 @@
       "type": "pad",
       "mode": "momentary",
       "visible": true,
-      "name": "RECORD",
-      "color": "F97316",
+      "name": "Record",
+      "color": "FBBF24",
       "bounds": [
         216,
         20,

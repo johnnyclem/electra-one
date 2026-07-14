@@ -39,6 +39,7 @@ C_MIX = "F59E0B"
 C_WHT = "FFFFFF"
 C_FX = "EC4899"
 C_LOOP = "06B6D4"
+C_AMBER = "FBBF24"  # Record idle (Lua paints red while recording)
 
 _next_carrier = 40
 
@@ -239,10 +240,14 @@ def build_devices() -> list[dict]:
 
 
 def soft_button_pads(c: list[dict], page: int, id_base: int) -> None:
-    """Soft keys 2–5 via potIds 9–12 (Mini factory alias)."""
+    """Soft keys 2–5 via potIds 9–12 (Mini factory alias).
+
+    Play/Record labels + colors are stateful in Lua (Play/Pause/Stop,
+    Record amber↔red). Defaults below are the idle look.
+    """
     specs = [
-        (0, "PLAY/STOP", "onPlayStop", C_PLAY, 9),
-        (1, "RECORD", "onRecord", C_REC, 10),
+        (0, "Play", "onPlayStop", C_PLAY, 9),
+        (1, "Record", "onRecord", C_AMBER, 10),
         (2, "UNDO", "onUndo", C_UNDO, 11),
         (3, "TAP", "onTap", C_DIM, 12),
     ]
@@ -276,10 +281,11 @@ def build_controls() -> list[dict]:
     c.append(fader(6, "TRK 6", 1, 1, 1, param=25, color=C_TRK, pot_id=6, default=100))
 
     # ----- Page 2: Transport (pots 1–6) -----
-    # PLAY | RECORD | UNDO | TRACK
+    # Play | Record | UNDO | TRACK
     # LOOP DN | LOOP UP
-    c.append(action_pad(20, "PLAY/STOP", 2, 0, 0, color=C_PLAY, function="onPlayStop", pot_id=1))
-    c.append(action_pad(21, "RECORD", 2, 1, 0, color=C_REC, function="onRecord", pot_id=2))
+    # Lua renames Play→Pause→Stop and paints Record amber/red.
+    c.append(action_pad(20, "Play", 2, 0, 0, color=C_PLAY, function="onPlayStop", pot_id=1))
+    c.append(action_pad(21, "Record", 2, 1, 0, color=C_AMBER, function="onRecord", pot_id=2))
     c.append(action_pad(22, "UNDO", 2, 2, 0, color=C_UNDO, function="onUndo", pot_id=3))
     c.append(action_pad(23, "TRACK FSW", 2, 3, 0, color=C_TRK, function="onTrackFsw", pot_id=4))
     c.append(action_pad(24, "LOOP DN", 2, 0, 1, color=C_LOOP, function="onLoopDown", pot_id=5))

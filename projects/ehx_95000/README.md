@@ -31,7 +31,7 @@ The Valeton VLP-200 only supports **MIDI clock sync** on its TRS jacks (other co
 | # | Name | Controls |
 |---|------|----------|
 | 1 | **Mixer** | Track 1–6 volumes (CC20–25), pots 1–6 |
-| 2 | **Transport** | PLAY/STOP · RECORD · UNDO · TRACK FSW · LOOP DN · LOOP UP |
+| 2 | **Transport** | **Play/Pause/Stop** · **Record** (amber/red) · UNDO · TRACK FSW · LOOP DN · LOOP UP |
 | 3 | **Tracks** | Track 1–6 select (PC 110–115) |
 | 4 | **Loop** | Loop list (CC115 0–99), MIX VOL, MASTER, NEW LOOP, MIXDOWN, REVERSE |
 | 5 | **Modes** | OCT · PUNCH · QUANTIZE · **EXT IN/XT/BX** · **TEMPO** (BPM) · **Start/Stop MIDI Clock** |
@@ -40,8 +40,8 @@ The Valeton VLP-200 only supports **MIDI clock sync** on its TRS jacks (other co
 
 | Soft button | potId | Action |
 |-------------|-------|--------|
-| 2 | 9 | PLAY/STOP |
-| 3 | 10 | RECORD |
+| 2 | 9 | **Play** / **Pause** / **Stop** (stateful label) |
+| 3 | 10 | **Record** (amber idle → red while recording) |
 | 4 | 11 | UNDO |
 | 5 | 12 | TAP |
 
@@ -107,24 +107,45 @@ python3 projects/ehx_95000/generate.py
 
 ## Tips
 
-### RECORD is not discrete “rec arm” on the 95000
+### Transport labels (Play / Pause / Stop + Record color)
 
-The hardware **RECORD** footswitch is multi-mode (manual p.12). MIDI PC 102 is the same switch — Electra cannot turn it into pure rec on/off:
+Optimistic UI on **all** Play/Record pads (Transport page + soft keys every page). The 95000 still has one PLAY footswitch (PC 103) and one RECORD (PC 102); Electra just shows clearer labels.
+
+| Transport mode | Play pad | Record pad |
+|----------------|----------|------------|
+| Stopped | **Play** (green) | **Record** (amber) |
+| Playing | **Pause** (green) | **Record** (amber) |
+| Recording / overdub | **Stop** (soft red) | **Record** (**red**) |
+| Armed (NEW LOOP) | **Play** (green) | **Record** (orange) |
+
+State machine (manual p.11–12):
+
+| Press | From | To |
+|-------|------|-----|
+| Play | stopped / armed | playing |
+| Pause (Play pad) | playing | stopped |
+| Stop (Play pad) | recording | stopped |
+| Record | stopped / playing / armed | recording |
+| Record | recording | playing (exit overdub) |
+| NEW LOOP | not armed | armed |
+| NEW LOOP | armed | stopped |
+
+There is **no true Pause** on the 95000 — Pause = idle/stop. Empty-loop PLAY is a no-op on the device; Electra may still flip to Play optimistically.
+
+RECORD is still multi-mode hardware (not pure rec-arm):
 
 | Current mode | RECORD does |
 |--------------|-------------|
 | Idle, empty loop | Start recording a New Loop |
-| Idle, loop has audio | Start **overdub** (existing tracks play while you record) |
-| Playback | Enter **overdub** (again: plays + records) |
+| Idle, loop has audio | Start **overdub** |
+| Playback | Enter **overdub** |
 | Overdubbing | Exit to **playback** |
 
-So if a loop already has audio, RECORD will sound like “play started.” That is normal 95000 behavior.
+Discrete workflows:
 
-More discrete workflows:
-
-1. **Arm then record:** `NEW LOOP` → Record-Ready (RECORD LED blinks) → `RECORD` to start capture.
-2. **Play only:** use `PLAY/STOP` — does not enter overdub.
-3. **Stop overdub without layering:** press `RECORD` again (returns to playback) or `PLAY/STOP` to idle.
+1. **Arm then record:** `NEW LOOP` → orange Record → `Record` to capture.
+2. **Play only:** use **Play** — does not enter overdub.
+3. **End overdub:** press **Record** again (→ playback / Pause label) or **Stop** on the Play pad (→ idle).
 
 ### Loop select
 
